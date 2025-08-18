@@ -1,0 +1,2068 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blackhole</title>
+	<link rel="icon" href="icon.png" type="image/png">
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: #000;
+        overflow: hidden;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      }
+       #hint {
+        position: fixed;
+        left: 50%;
+        bottom: 24px;
+        transform: translateX(-50%);
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.06);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        color: #cfcfcf;
+        font-size: 12px;
+        letter-spacing: .2px;
+        user-select: none;
+        pointer-events: none;
+        box-shadow: 0 4px 20px rgba(0,0,0,.6);
+        z-index: 100;
+        opacity: 0; /* Torna o rodapé invisível */
+        transition: opacity 0.3s ease-in-out; /* Adiciona uma transição suave */
+      }
+      #hint:hover {
+        opacity: 1; /* Torna-o visível ao passar o mouse */
+        pointer-events: auto; /* Permite a interação com os links */
+      }
+      a { 
+        color: #9bdcff; 
+        text-decoration: none; 
+        pointer-events: auto; 
+        cursor: pointer;
+      }
+      #loading {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #fff;
+        font-size: 18px;
+        z-index: 50;
+      }
+      #error {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #ff6b6b;
+        font-size: 16px;
+        text-align: center;
+        z-index: 50;
+        display: none;
+      }
+      #debug {
+        position: fixed;
+		display: none;
+        top: 20px;
+        right: 20px;
+        color: rgba(255,255,255,0.7);
+        font-size: 11px;
+        font-family: monospace;
+        background: rgba(0,0,0,0.5);
+        padding: 12px;
+        border-radius: 6px;
+        backdrop-filter: blur(8px);
+        z-index: 90;
+        border: 1px solid rgba(255,255,255,0.1);
+      }
+      #controls {
+        position: fixed;
+        bottom: 60px;
+        left: 20px;
+        color: rgba(255,255,255,0.8);
+        font-size: 12px;
+        background: rgba(0,0,0,0.6);
+        padding: 12px;
+        border-radius: 6px;
+        backdrop-filter: blur(8px);
+        z-index: 90;
+        border: 1px solid rgba(255,255,255,0.1);
+      }
+      .control-button {
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
+        color: #fff;
+        padding: 4px 8px;
+        margin: 2px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 11px;
+      }
+      .control-button:hover {
+        background: rgba(255,255,255,0.2);
+      }
+      .control-button.active {
+        background: rgba(0,150,255,0.3);
+        border-color: rgba(0,150,255,0.5);
+      }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="loading">Carregando Buraco Negro Híbrido...</div>
+    <div id="error">
+      Erro ao carregar Three.js<br>
+      <small>Verifique sua conexão com a internet</small>
+    </div>
+    <div id="hint"> Duplo clique: Mini meteoros • <a href="#" id="reset">Resetar Câmera</a> • <a href="#" id="toggle-debug">Debug Mode</a> • <a href="#" id="toggle-warp"></a> <a href="#" id="toggle-covers">Desabilitar Livros</a> • Botão direito: Acelerar gravidade</div>
+    <div id="debug">
+      Distância: <span id="distance">0</span> UA<br>
+
+      Meteoros: <span id="mini-meteors">0</span><br>
+      Livros: <span id="book-count">0</span><br>
+
+      Gravidade: <span id="gravity-status">1x</span><br>
+      FPS: <span id="fps">0</span>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js">
+</script>
+    <script>
+      if (typeof THREE === 'undefined') {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('error').style.display = 'block';
+        throw new Error('Three.js não pôde ser carregado');
+      }
+      document.getElementById('loading').style.display = 'none';
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+      camera.position.set(0, 8, 15);
+      const renderer = new THREE.WebGLRenderer({ 
+        antialias: true, 
+        powerPreference: "high-performance",
+        precision: "highp"
+      });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setClearColor(0x000000);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.autoClear = false;
+      document.body.appendChild(renderer.domElement);
+let coversMuted = false;
+function setCoversMuted(on) {
+  coversMuted = on;
+  const a = document.getElementById('toggle-covers');
+  if (a) a.textContent = on ? 'Habilitar Livros' : 'Desabilitar Livros';
+}
+const toggleCoversEl = document.getElementById('toggle-covers');
+if (toggleCoversEl) {
+  toggleCoversEl.addEventListener('click', (e) => {
+    e.preventDefault();
+    setCoversMuted(!coversMuted);
+  });
+}
+const CLICK_MOVE_PX   = 6;
+const ORBIT_EPS       = 0.003;
+const ORBIT_SETTLE_MS = 180;
+let _down = null;
+let _dragging = false;
+let _lastOrbitActiveAt = 0;
+function isOrbitMoving() {
+  if (warp && warp.active) return true;
+  const c = controls.camera;
+  return (
+    Math.abs(c.targetPhi      - c.phi)      > ORBIT_EPS ||
+    Math.abs(c.targetTheta    - c.theta)    > ORBIT_EPS ||
+    Math.abs(c.targetDistance - c.distance) > ORBIT_EPS
+  );
+}
+function orbitRecentlyMoved() {
+  return (performance.now() - _lastOrbitActiveAt) < ORBIT_SETTLE_MS;
+}
+function shouldBlockBookActions() {
+  return _dragging || isOrbitMoving() || orbitRecentlyMoved();
+}
+const canvasEl = renderer.domElement;
+canvasEl.addEventListener('pointerdown', (e) => {
+  _down = { x: e.clientX, y: e.clientY, t: performance.now() };
+  _dragging = false;
+});
+canvasEl.addEventListener('pointermove', (e) => {
+  if (!_down) return;
+  const dx = e.clientX - _down.x, dy = e.clientY - _down.y;
+  _dragging = (dx*dx + dy*dy) > (CLICK_MOVE_PX*CLICK_MOVE_PX);
+});
+canvasEl.addEventListener('pointerup', () => {
+  _down = null;
+  setTimeout(() => { _dragging = false; }, 0);
+});
+const SPHERICAL_COMET_CONFIG = {
+  count: 2,
+  radius: 1000,
+  center: new THREE.Vector3(0, 0, 0),
+  starSize: 5,
+  trailSegments: 333,
+  trailOpacity: 0.03,
+  omegaMin: THREE.MathUtils.degToRad(18),
+  omegaMax: THREE.MathUtils.degToRad(28),
+  precessionMin: THREE.MathUtils.degToRad(2),
+  precessionMax: THREE.MathUtils.degToRad(5)
+};
+function makeStarSprite(size=128) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(size/2,size/2,0, size/2,size/2,size/2);
+  g.addColorStop(0.0,'rgba(255,255,255,1)');
+  g.addColorStop(0.2,'rgba(255,255,255,0.9)');
+  g.addColorStop(0.5,'rgba(255,255,255,0.25)');
+  g.addColorStop(1.0,'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(size/2,size/2,size/2,0,Math.PI*2); ctx.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  return tex;
+}
+function randUnit() {
+  let x, y, z, s;
+  do { x = Math.random()*2-1; y = Math.random()*2-1; z = Math.random()*2-1; s = x*x+y*y+z*z; } while (s < 1e-6 || s > 1);
+  const inv = 1/Math.sqrt(s);
+  return new THREE.Vector3(x*inv, y*inv, z*inv);
+}
+class SphericalComet {
+  constructor(scene, tex, cfg) {
+    this.cfg = cfg;
+    const smat = new THREE.SpriteMaterial({
+      map: tex, transparent: true, depthWrite: false, depthTest: true,
+      blending: THREE.AdditiveBlending, opacity: 1
+    });
+    this.sprite = new THREE.Sprite(smat);
+    this.sprite.scale.setScalar(cfg.starSize);
+    this.sprite.renderOrder = -50;
+    const g = new THREE.BufferGeometry();
+    const pos = new Float32Array(cfg.trailSegments * 3);
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.attributes.position.setUsage(THREE.DynamicDrawUsage);
+    const lmat = new THREE.LineBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: cfg.trailOpacity,
+      depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending
+    });
+    this.trail = new THREE.Line(g, lmat);
+    this.trail.frustumCulled = false;
+    this.trail.renderOrder = -40;
+
+    scene.add(this.sprite);
+    scene.add(this.trail);
+    this.center = cfg.center.clone();
+    this.radius = cfg.radius;
+    this.q = new THREE.Quaternion();
+    this.axisA = randUnit();
+    this.axisB = randUnit();
+    this.omega = THREE.MathUtils.randFloat(cfg.omegaMin, cfg.omegaMax);
+    this.precession = THREE.MathUtils.randFloat(cfg.precessionMin, cfg.precessionMax);
+    const r = randUnit();
+    this.v0 = r.sub(this.axisA.clone().multiplyScalar(r.dot(this.axisA))).normalize();
+    this._setPositionFromQuat();
+    const P = this.trail.geometry.getAttribute('position');
+    for (let i = 0; i < cfg.trailSegments; i++) {
+      P.array[3*i+0] = this.pos.x;
+      P.array[3*i+1] = this.pos.y;
+      P.array[3*i+2] = this.pos.z;
+    }
+    P.needsUpdate = true;
+    this._qMain = new THREE.Quaternion();
+    this._qPrec = new THREE.Quaternion();
+  }
+  _setPositionFromQuat() {
+    const v = this.v0.clone().applyQuaternion(this.q).multiplyScalar(this.radius);
+    this.pos = this.center.clone().add(v);
+  }
+  update(dt) {
+    this._qMain.setFromAxisAngle(this.axisA, this.omega * dt);
+    this._qPrec.setFromAxisAngle(this.axisB, this.precession * dt);
+    this.q.premultiply(this._qPrec);
+    this.q.premultiply(this._qMain);
+    this.q.normalize();
+    this._setPositionFromQuat();
+    this.sprite.position.copy(this.pos);
+    const P = this.trail.geometry.getAttribute('position');
+    const n = this.cfg.trailSegments;
+    for (let i = n - 1; i > 0; i--) {
+      P.array[3*i+0] = P.array[3*(i-1)+0];
+      P.array[3*i+1] = P.array[3*(i-1)+1];
+      P.array[3*i+2] = P.array[3*(i-1)+2];
+    }
+    P.array[0] = this.pos.x;
+    P.array[1] = this.pos.y;
+    P.array[2] = this.pos.z;
+    P.needsUpdate = true;
+  }
+}
+class SphericalCometManager {
+  constructor(scene, cfg) {
+    this.comets = [];
+    const tex = makeStarSprite(128);
+    for (let i = 0; i < cfg.count; i++) {
+      const c = new SphericalComet(scene, tex, cfg);
+      c.q.setFromAxisAngle(c.axisA, (i / cfg.count) * Math.PI * 2).multiply(c.q);
+      this.comets.push(c);
+    }
+  }
+  update(dt) {
+    for (const c of this.comets) c.update(dt);
+  }
+}
+      const renderModes = {
+        HYBRID: 'hybrid',
+        SHADER_ONLY: 'shader',
+        PHYSICS_ONLY: 'physics'
+      };
+      let currentMode = renderModes.HYBRID;
+      const shaderCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+      shaderCamera.position.set(0, 0, 1);
+      const shaderScene = new THREE.Scene();
+      const controls = {
+        camera: {
+          distance: 12,
+          targetDistance: 12,
+          phi: Math.PI * 0.3,
+          theta: 0,
+          targetPhi: Math.PI * 0.3,
+          targetTheta: 0
+        },
+        damping: 0.08,
+        minDistance: 3,
+        maxDistance: 300,
+        sensitivity: 2,
+        warpSpace: true
+      };
+	
+	function snapOrbitToCurrentCamera(center = new THREE.Vector3(0,0,0)) {
+  const off = camera.position.clone().sub(center);
+  const r = off.length() || 1e-6;
+  const phi = Math.acos(THREE.MathUtils.clamp(off.y / r, -1, 1));
+  const theta = Math.atan2(off.z, off.x);
+
+  controls.camera.distance       = r;
+  controls.camera.targetDistance = r;
+  controls.camera.phi            = phi;
+  controls.camera.targetPhi      = phi;
+  controls.camera.theta          = theta;
+  controls.camera.targetTheta    = theta;
+}
+      let isGravityAltered = false;
+      let gravityMultiplier = 1.0;
+      const miniMeteors = [];
+      let miniMeteorCount = 0;
+      const virtualCamera = new THREE.Vector3(0, 8, 15);
+      const bookSystem = {
+        books: [],
+        hoveredBook: null,
+        raycaster: new THREE.Raycaster(),
+        mouse: new THREE.Vector2()
+      };
+function makeCircleSprite(size=1) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  g.addColorStop(0.00, 'rgba(255,255,255,1)');
+  g.addColorStop(0.35, 'rgba(255,200,120,0.90)');
+  g.addColorStop(0.70, 'rgba(255,120,40,0.40)');
+  g.addColorStop(1.00, 'rgba(255,120,40,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(size/2, size/2, size/2, 0, Math.PI*2); ctx.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+class ExplosionManager {
+  constructor(scene) {
+    this.scene = scene;
+    this.explosions = [];
+    this.spriteTex = makeCircleSprite(24);
+  }
+  spawn(pos, opts={}) {
+    const count = opts.count || 16;
+    const maxLife = opts.life || 1.4;
+    const geom = new THREE.BufferGeometry();
+    const positions  = new Float32Array(count * 3);
+    const velocities = new Float32Array(count * 3);
+    const baseSpeed = 8.6 + Math.random()*0.6;
+    for (let i=0;i<count;i++) {
+      positions[3*i+0]=pos.x; positions[3*i+1]=pos.y; positions[3*i+2]=pos.z;
+      let x,y,z; do { x=Math.random()*2-1; y=Math.random()*2-1; z=Math.random()*2-1; }
+      while (x*x+y*y+z*z < 1e-4);
+      const inv = 1/Math.hypot(x,y,z); x*=inv; y*=inv; z*=inv;
+      const s = baseSpeed * (0.6 + Math.random()*1.4);
+      velocities[3*i+0]=x*s; velocities[3*i+1]=y*s; velocities[3*i+2]=z*s;
+    }
+    geom.setAttribute('position', new THREE.BufferAttribute(positions,3));
+    geom.setAttribute('velocity', new THREE.BufferAttribute(velocities,3));
+    const mat = new THREE.PointsMaterial({
+      map: this.spriteTex,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.AdditiveBlending,
+      size: 1,
+      sizeAttenuation: true,
+      opacity: 0.95
+    });
+    const points = new THREE.Points(geom, mat);
+    points.renderOrder = 1600;
+    this.scene.add(points);
+    this.explosions.push({ mesh: points, life: 0, maxLife });
+  }
+  update(dt) {
+    for (let i=this.explosions.length-1; i>=0; i--) {
+      const e = this.explosions[i];
+      e.life += dt;
+      const t = e.life / e.maxLife;
+
+      const pos = e.mesh.geometry.getAttribute('position');
+      const vel = e.mesh.geometry.getAttribute('velocity');
+      for (let j=0;j<pos.count;j++) {
+        pos.array[3*j+0] += vel.array[3*j+0] * dt;
+        pos.array[3*j+1] += vel.array[3*j+1] * dt;
+        pos.array[3*j+2] += vel.array[3*j+2] * dt;
+      }
+      pos.needsUpdate = true;
+      e.mesh.material.opacity = Math.max(0, 1 - t);
+      e.mesh.material.size = 0.1
+      if (e.life >= e.maxLife) {
+        this.scene.remove(e.mesh);
+        e.mesh.geometry.dispose();
+        e.mesh.material.map.dispose();
+        e.mesh.material.dispose();
+        this.explosions.splice(i,1);
+      }
+    }
+  }
+}
+const explosionManager = new ExplosionManager(scene);
+function pickRandomEligibleBook() {
+  const candidates = bookSystem.books.filter(b =>
+    b && b.sprite && b.sprite.visible !== false && !b._exploded && (selectedBook !== b)
+  );
+  if (!candidates.length) return null;
+  return candidates[Math.floor(Math.random()*candidates.length)];
+}
+function explodeBook(book) {
+  if (!book || book._exploded) return;
+  book._exploded = true;
+  const p = book.sprite.position.clone();
+  book.sprite.visible = false;
+  explosionManager.spawn(p, { count: 200, life: 6.6 });
+  setTimeout(() => {
+    if (!book || !book.sprite) return;
+    book.sprite.visible = !coversMuted;
+    book._exploded = false;
+  }, 60000);
+}
+function startExplosionScheduler() {
+  setTimeout(() => { const b = pickRandomEligibleBook(); if (b) explodeBook(b); }, 10000);
+  setInterval(() => {
+    if (warp && warp.active) return; 
+    const b = pickRandomEligibleBook();
+    if (b) explodeBook(b);
+  }, 13690);
+}
+let selectedBook = null;
+let cameraTarget = new THREE.Vector3();
+let smoothFactor = 0.05; 
+const warp = {
+  active: false,
+  v: 0,
+  a: 0,
+  maxA: 24,
+  c: 180,
+  brakeFactor: 1.6,
+  minDist: 0.9,
+  target: new THREE.Vector3(),
+  look: new THREE.Vector3(),
+  phase: 'idle', 
+  focusT: 0,
+  focusV: 0,
+  focusA: 2.2,
+  focusFrom: new THREE.Vector3(),
+  focusTo: new THREE.Vector3(),
+  fovHold: 95,
+  fovTravel: 80
+};
+function startWarpToBlackHole() {
+  const dir0 = new THREE.Vector3();
+  camera.getWorldDirection(dir0);
+  const currentLookPoint = camera.position.clone().add(dir0.multiplyScalar(10));
+  if (selectedBook && selectedBook.sprite) {
+    const bookPos = selectedBook.sprite.position.clone();
+    const fromBookDir = camera.position.clone().sub(bookPos).normalize();
+	const backDist = 2.0;
+    warp.target.copy(camera.position).addScaledVector(fromBookDir, backDist);
+    warp.look.copy(bookPos);
+    warp.active = true;
+    warp.phase  = 'preBack';
+    warp.v = 0; 
+    warp.a = 0;
+    warp.focusFrom.copy(bookPos);
+    warp.focusTo.set(0, 0, 0);
+    warp.focusT = 0;
+    warp.focusV = 0;
+	 warp.fovStart  = camera.fov;
+    warp.fovTarget = 70;
+    return;
+  }
+  selectedBook = null;
+  warp.active = true;
+  warp.phase  = 'focus';
+  warp.v = 0; 
+  warp.a = 0;
+  warp.focusFrom.copy(currentLookPoint);
+  warp.focusTo.set(0, 0, 0);
+  warp.focusT = 0;
+  warp.focusV = 0;
+  warp.look.copy(currentLookPoint);
+  warp.fovTarget = 30;
+}
+window.addEventListener('wheel', () => {
+  if (selectedBook) {
+    startWarpToBlackHole();
+	event.preventDefault();
+  }
+}, { passive: false });
+function startWarpTo(bookObj) {
+  if (!bookObj || !bookObj.sprite) return;
+  selectedBook = bookObj;
+  const bookPos = bookObj.sprite.position.clone();
+  const dirToBook = bookPos.clone().sub(camera.position).normalize();
+  const stopDist = 1.0;
+  warp.target.copy(bookPos).addScaledVector(dirToBook, -stopDist);
+  warp.look.copy(bookPos);
+  const dir0 = new THREE.Vector3();
+  camera.getWorldDirection(dir0);
+  const currentLookPoint = camera.position.clone().add(dir0.multiplyScalar(10));
+  warp.phase = 'focus';
+  warp.active = true;
+  warp.focusFrom.copy(currentLookPoint);
+  warp.focusTo.copy(bookPos);
+  warp.focusT = 0;
+  warp.focusV = 0;
+  warp.v = 0;
+  warp.a = 0;
+}
+const targetScreenPos = new THREE.Vector3(-5, 3, 10);
+function updateRelativisticApproach(delta) {
+if (warp.active && warp.phase === 'preBack') {
+  const toTarget = warp.target.clone().sub(camera.position);
+  const dist = toTarget.length();
+  if (dist > 1e-6) {
+    const dir = toTarget.normalize();
+    const neededStop = (warp.v * warp.v) / (2 * warp.maxA * warp.brakeFactor);
+    warp.a = dist <= Math.max(neededStop, warp.minDist) ? -warp.maxA * warp.brakeFactor : warp.maxA;
+    warp.v = Math.max(0, Math.min(warp.c, warp.v + warp.a * delta));
+    const step = Math.min(dist, warp.v * delta);
+    camera.position.addScaledVector(dir, step);
+  }
+  if (selectedBook && selectedBook.sprite) {
+    camera.lookAt(selectedBook.sprite.position);
+  }
+  const fovAim = (typeof warp.fovTarget === 'number') ? warp.fovTarget : 120;
+  camera.fov += (fovAim - camera.fov) * 0.06;
+  camera.updateProjectionMatrix();
+  if (dist <= warp.minDist && warp.v < 0.25) {
+    camera.position.copy(warp.target);
+    warp.phase = 'focus';
+    warp.v = 0; 
+    warp.a = 0;
+    if (selectedBook && selectedBook.sprite) {
+      warp.focusFrom.copy(selectedBook.sprite.position);
+    }
+    selectedBook = null;
+  }
+  return;
+}
+  if (warp.active && warp.phase === 'focus') {
+  warp.focusV += warp.focusA * delta;
+  warp.focusT  = Math.min(1, warp.focusT + warp.focusV * delta);
+  const t = warp.focusT;
+  const ease = t * t * (3 - 2 * t);
+  const targetLook = (selectedBook && selectedBook.sprite)
+    ? selectedBook.sprite.position
+    : warp.focusTo;
+  warp.look.copy(warp.focusFrom).lerp(targetLook, ease);
+  camera.lookAt(warp.look);
+  const fovAim = (typeof warp.fovTarget === 'number') ? warp.fovTarget : 100;
+  camera.fov += (fovAim - camera.fov) * 0.08;
+  camera.updateProjectionMatrix();
+  if (warp.focusT >= 1) {
+  const returningBH = !selectedBook || !selectedBook.sprite;
+  if (returningBH) {
+    snapOrbitToCurrentCamera(new THREE.Vector3(0,0,0));
+    warp.active = false;
+    warp.phase  = 'idle';
+  } else {
+    warp.phase = 'go';
+    warp.v = 0; 
+    warp.a = 0;
+  }
+}
+  return;
+}
+  if (warp.active && warp.phase === 'go') {
+    if (selectedBook && selectedBook.sprite) {
+      const bookPos = selectedBook.sprite.position.clone();
+      const dirDyn = bookPos.clone().sub(camera.position).normalize();
+      const stopDist = 1.2;
+      warp.target.copy(bookPos).addScaledVector(dirDyn, -stopDist);
+      warp.look.copy(bookPos);
+    }
+    const toTarget = warp.target.clone().sub(camera.position);
+    const dist = toTarget.length();
+    if (dist > 1e-6) {
+      const dir = toTarget.normalize();
+      const neededStop = (warp.v * warp.v) / (2 * warp.maxA * warp.brakeFactor);
+      if (dist <= Math.max(neededStop, warp.minDist)) {
+        warp.a = -warp.maxA * warp.brakeFactor;
+      } else {
+        warp.a = warp.maxA;
+      }
+      warp.v = Math.max(0, Math.min(warp.c, warp.v + warp.a * delta));
+      const step = Math.min(dist, warp.v * delta);
+      camera.position.addScaledVector(dir, step);
+    }
+    if (selectedBook && selectedBook.sprite) camera.lookAt(warp.look);
+    camera.fov += (warp.fovTravel - camera.fov ) * 0.06;
+    camera.updateProjectionMatrix();
+if (dist <= warp.minDist && warp.v < 0.25) {
+  camera.position.copy(warp.target);
+  if (selectedBook && selectedBook.sprite) {
+    snapOrbitToCurrentCamera(selectedBook.sprite.position);
+  } else {
+    snapOrbitToCurrentCamera(new THREE.Vector3(0,0,0));
+  }
+  warp.active = false;
+  warp.phase  = 'idle';
+  warp.v = 0;
+  warp.a = 0;
+}
+    return;
+  }
+if (selectedBook && selectedBook.sprite) {
+  const bookPos = selectedBook.sprite.position.clone();
+  camera.lookAt(bookPos);
+  camera.fov += (30 - camera.fov) * 0.05;
+  camera.updateProjectionMatrix();
+  return;
+}
+}
+      const bookData = [
+        { cover: 'capas/livro1.png', pdf: 'livros/livro1.pdf', title: 'Livro 1' },
+        { cover: 'capas/livro2.png', pdf: 'livros/livro2.pdf', title: 'Livro 2' },
+        { cover: 'capas/livro3.png', pdf: 'livros/livro3.pdf', title: 'Livro 3' },
+        { cover: 'capas/livro4.png', pdf: 'livros/livro4.pdf', title: 'Livro 4' },
+        { cover: 'capas/livro5.png', pdf: 'livros/livro5.pdf', title: 'Livro 5' },
+        { cover: 'capas/livro6.png', pdf: 'livros/livro6.pdf', title: 'Livro 6' },
+        { cover: 'capas/livro7.png', pdf: 'livros/livro7.pdf', title: 'Livro 7' },
+        { cover: 'capas/livro8.png', pdf: 'livros/livro8.pdf', title: 'Livro 8' },
+        { cover: 'capas/livro9.png', pdf: 'livros/livro9.pdf', title: 'Livro 9' },
+        { cover: 'capas/livro10.png', pdf: 'livros/livro10.pdf', title: 'Livro 10' },
+  { cover: 'capas/livro11.png', pdf: 'livros/livro11.pdf', title: 'Livro 11' },
+  { cover: 'capas/livro12.png', pdf: 'livros/livro12.pdf', title: 'Livro 12' },
+  { cover: 'capas/livro13.png', pdf: 'livros/livro13.pdf', title: 'Livro 13' },
+  { cover: 'capas/livro14.png', pdf: 'livros/livro14.pdf', title: 'Livro 14' },
+  { cover: 'capas/livro15.png', pdf: 'livros/livro15.pdf', title: 'Livro 15' },
+  { cover: 'capas/livro16.png', pdf: 'livros/livro16.pdf', title: 'Livro 16' },
+  { cover: 'capas/livro17.png', pdf: 'livros/livro17.pdf', title: 'Livro 17' },
+  { cover: 'capas/livro18.png', pdf: 'livros/livro18.pdf', title: 'Livro 18' },
+  { cover: 'capas/livro19.png', pdf: 'livros/livro19.pdf', title: 'Livro 19' },
+  { cover: 'capas/livro20.png', pdf: 'livros/livro20.pdf', title: 'Livro 20' },
+  { cover: 'capas/livro21.png', pdf: 'livros/livro21.pdf', title: 'Livro 21' },
+  { cover: 'capas/livro22.png', pdf: 'livros/livro22.pdf', title: 'Livro 22' },
+  { cover: 'capas/livro23.png', pdf: 'livros/livro23.pdf', title: 'Livro 23' },
+  { cover: 'capas/livro24.png', pdf: 'livros/livro24.pdf', title: 'Livro 24' },
+  { cover: 'capas/livro25.png', pdf: 'livros/livro25.pdf', title: 'Livro 25' },
+  { cover: 'capas/livro26.png', pdf: 'livros/livro26.pdf', title: 'Livro 26' },
+  { cover: 'capas/livro27.png', pdf: 'livros/livro27.pdf', title: 'Livro 27' },
+  { cover: 'capas/livro28.png', pdf: 'livros/livro28.pdf', title: 'Livro 28' },
+  { cover: 'capas/livro29.png', pdf: 'livros/livro29.pdf', title: 'Livro 29' },
+  { cover: 'capas/livro30.png', pdf: 'livros/livro30.pdf', title: 'Livro 30' },
+  { cover: 'capas/livro31.png', pdf: 'livros/livro31.pdf', title: 'Livro 31' },
+  { cover: 'capas/livro32.png', pdf: 'livros/livro32.pdf', title: 'Livro 32' },
+  { cover: 'capas/livro33.png', pdf: 'livros/livro33.pdf', title: 'Livro 33' },
+  { cover: 'capas/livro34.png', pdf: 'livros/livro34.pdf', title: 'Livro 34' },
+  { cover: 'capas/livro35.png', pdf: 'livros/livro35.pdf', title: 'Livro 35' },
+  { cover: 'capas/livro36.png', pdf: 'livros/livro36.pdf', title: 'Livro 36' },
+  { cover: 'capas/livro37.png', pdf: 'livros/livro37.pdf', title: 'Livro 37' },
+  { cover: 'capas/livro38.png', pdf: 'livros/livro38.pdf', title: 'Livro 38' },
+  { cover: 'capas/livro39.png', pdf: 'livros/livro39.pdf', title: 'Livro 39' },
+  { cover: 'capas/livro40.png', pdf: 'livros/livro40.pdf', title: 'Livro 40' },
+  { cover: 'capas/livro41.png', pdf: 'livros/livro41.pdf', title: 'Livro 41' },
+  { cover: 'capas/livro42.png', pdf: 'livros/livro42.pdf', title: 'Livro 42' },
+  { cover: 'capas/livro43.png', pdf: 'livros/livro43.pdf', title: 'Livro 43' },
+  { cover: 'capas/livro44.png', pdf: 'livros/livro44.pdf', title: 'Livro 44' },
+  { cover: 'capas/livro45.png', pdf: 'livros/livro45.pdf', title: 'Livro 45' },
+  { cover: 'capas/livro46.png', pdf: 'livros/livro46.pdf', title: 'Livro 46' },
+  { cover: 'capas/livro47.png', pdf: 'livros/livro47.pdf', title: 'Livro 47' },
+  { cover: 'capas/livro48.png', pdf: 'livros/livro48.pdf', title: 'Livro 48' },
+  { cover: 'capas/livro49.png', pdf: 'livros/livro49.pdf', title: 'Livro 49' },
+  { cover: 'capas/livro50.png', pdf: 'livros/livro50.pdf', title: 'Livro 50' },
+  { cover: 'capas/livro51.png', pdf: 'livros/livro51.pdf', title: 'Livro 51' },
+  { cover: 'capas/livro52.png', pdf: 'livros/livro52.pdf', title: 'Livro 52' },
+  { cover: 'capas/livro53.png', pdf: 'livros/livro53.pdf', title: 'Livro 53' },
+  { cover: 'capas/livro54.png', pdf: 'livros/livro54.pdf', title: 'Livro 54' },
+  { cover: 'capas/livro55.png', pdf: 'livros/livro55.pdf', title: 'Livro 55' },
+  { cover: 'capas/livro56.png', pdf: 'livros/livro56.pdf', title: 'Livro 56' },
+  { cover: 'capas/livro57.png', pdf: 'livros/livro57.pdf', title: 'Livro 57' },
+  { cover: 'capas/livro58.png', pdf: 'livros/livro58.pdf', title: 'Livro 58' },
+  { cover: 'capas/livro59.png', pdf: 'livros/livro59.pdf', title: 'Livro 59' },
+  { cover: 'capas/livro60.png', pdf: 'livros/livro60.pdf', title: 'Livro 60' },
+  { cover: 'capas/livro61.png', pdf: 'livros/livro61.pdf', title: 'Livro 61' },
+  { cover: 'capas/livro62.png', pdf: 'livros/livro62.pdf', title: 'Livro 62' },
+  { cover: 'capas/livro63.png', pdf: 'livros/livro63.pdf', title: 'Livro 63' },
+  { cover: 'capas/livro64.png', pdf: 'livros/livro64.pdf', title: 'Livro 64' },
+  { cover: 'capas/livro65.png', pdf: 'livros/livro65.pdf', title: 'Livro 65' },
+  { cover: 'capas/livro66.png', pdf: 'livros/livro66.pdf', title: 'Livro 66' },
+  { cover: 'capas/livro67.png', pdf: 'livros/livro67.pdf', title: 'Livro 67' },
+  { cover: 'capas/livro68.png', pdf: 'livros/livro68.pdf', title: 'Livro 68' },
+  { cover: 'capas/livro69.png', pdf: 'livros/livro69.pdf', title: 'Livro 69' },
+  { cover: 'capas/livro70.png', pdf: 'livros/livro70.pdf', title: 'Livro 70' },
+  { cover: 'capas/livro71.png', pdf: 'livros/livro71.pdf', title: 'Livro 71' },
+  { cover: 'capas/livro72.png', pdf: 'livros/livro72.pdf', title: 'Livro 72' },
+  { cover: 'capas/livro73.png', pdf: 'livros/livro73.pdf', title: 'Livro 73' },
+  { cover: 'capas/livro74.png', pdf: 'livros/livro74.pdf', title: 'Livro 74' },
+  { cover: 'capas/livro75.png', pdf: 'livros/livro75.pdf', title: 'Livro 75' },
+  { cover: 'capas/livro76.png', pdf: 'livros/livro76.pdf', title: 'Livro 76' },
+  { cover: 'capas/livro77.png', pdf: 'livros/livro77.pdf', title: 'Livro 77' },
+  { cover: 'capas/livro78.png', pdf: 'livros/livro78.pdf', title: 'Livro 78' },
+  { cover: 'capas/livro79.png', pdf: 'livros/livro79.pdf', title: 'Livro 79' },
+  { cover: 'capas/livro80.png', pdf: 'livros/livro80.pdf', title: 'Livro 80' },
+  { cover: 'capas/livro81.png', pdf: 'livros/livro81.pdf', title: 'Livro 81' },
+  { cover: 'capas/livro82.png', pdf: 'livros/livro82.pdf', title: 'Livro 82' },
+  { cover: 'capas/livro83.png', pdf: 'livros/livro83.pdf', title: 'Livro 83' },
+  { cover: 'capas/livro84.png', pdf: 'livros/livro84.pdf', title: 'Livro 84' },
+  { cover: 'capas/livro85.png', pdf: 'livros/livro85.pdf', title: 'Livro 85' },
+  { cover: 'capas/livro86.png', pdf: 'livros/livro86.pdf', title: 'Livro 86' },
+  { cover: 'capas/livro87.png', pdf: 'livros/livro87.pdf', title: 'Livro 87' },
+  { cover: 'capas/livro88.png', pdf: 'livros/livro88.pdf', title: 'Livro 88' },
+  { cover: 'capas/livro89.png', pdf: 'livros/livro89.pdf', title: 'Livro 89' },
+  { cover: 'capas/livro90.png', pdf: 'livros/livro90.pdf', title: 'Livro 90' },
+  { cover: 'capas/livro91.png', pdf: 'livros/livro91.pdf', title: 'Livro 91' },
+  { cover: 'capas/livro92.png', pdf: 'livros/livro92.pdf', title: 'Livro 92' },
+  { cover: 'capas/livro93.png', pdf: 'livros/livro93.pdf', title: 'Livro 93' },
+  { cover: 'capas/livro94.png', pdf: 'livros/livro94.pdf', title: 'Livro 94' },
+  { cover: 'capas/livro95.png', pdf: 'livros/livro95.pdf', title: 'Livro 95' },
+  { cover: 'capas/livro96.png', pdf: 'livros/livro96.pdf', title: 'Livro 96' },
+  { cover: 'capas/livro97.png', pdf: 'livros/livro97.pdf', title: 'Livro 97' },
+  { cover: 'capas/livro98.png', pdf: 'livros/livro98.pdf', title: 'Livro 98' },
+  { cover: 'capas/livro99.png', pdf: 'livros/livro99.pdf', title: 'Livro 99' },
+  { cover: 'capas/livro100.png', pdf: 'livros/livro100.pdf', title: 'Livro 100' },
+  { cover: 'capas/livro101.png', pdf: 'livros/livro101.pdf', title: 'Livro 101' },
+  { cover: 'capas/livro102.png', pdf: 'livros/livro102.pdf', title: 'Livro 102' },
+  { cover: 'capas/livro103.png', pdf: 'livros/livro103.pdf', title: 'Livro 103' },
+  { cover: 'capas/livro104.png', pdf: 'livros/livro104.pdf', title: 'Livro 104' },
+  { cover: 'capas/livro105.png', pdf: 'livros/livro105.pdf', title: 'Livro 105' },
+  { cover: 'capas/livro106.png', pdf: 'livros/livro106.pdf', title: 'Livro 106' },
+  { cover: 'capas/livro107.png', pdf: 'livros/livro107.pdf', title: 'Livro 107' },
+  { cover: 'capas/livro108.png', pdf: 'livros/livro108.pdf', title: 'Livro 108' },
+  { cover: 'capas/livro109.png', pdf: 'livros/livro109.pdf', title: 'Livro 109' },
+  { cover: 'capas/livro110.png', pdf: 'livros/livro110.pdf', title: 'Livro 110' },
+  { cover: 'capas/livro111.png', pdf: 'livros/livro111.pdf', title: 'Livro 111' },
+  { cover: 'capas/livro112.png', pdf: 'livros/livro112.pdf', title: 'Livro 112' },
+  { cover: 'capas/livro113.png', pdf: 'livros/livro113.pdf', title: 'Livro 113' },
+  { cover: 'capas/livro114.png', pdf: 'livros/livro114.pdf', title: 'Livro 114' },
+  { cover: 'capas/livro115.png', pdf: 'livros/livro115.pdf', title: 'Livro 115' },
+  { cover: 'capas/livro116.png', pdf: 'livros/livro116.pdf', title: 'Livro 116' },
+  { cover: 'capas/livro117.png', pdf: 'livros/livro117.pdf', title: 'Livro 117' },
+  { cover: 'capas/livro118.png', pdf: 'livros/livro118.pdf', title: 'Livro 118' },
+  { cover: 'capas/livro119.png', pdf: 'livros/livro119.pdf', title: 'Livro 119' },
+  { cover: 'capas/livro120.png', pdf: 'livros/livro120.pdf', title: 'Livro 120' },
+  { cover: 'capas/livro121.png', pdf: 'livros/livro121.pdf', title: 'Livro 121' },
+  { cover: 'capas/livro122.png', pdf: 'livros/livro122.pdf', title: 'Livro 122' },
+  { cover: 'capas/livro123.png', pdf: 'livros/livro123.pdf', title: 'Livro 123' },
+  { cover: 'capas/livro124.png', pdf: 'livros/livro124.pdf', title: 'Livro 124' },
+  { cover: 'capas/livro125.png', pdf: 'livros/livro125.pdf', title: 'Livro 125' },
+  { cover: 'capas/livro126.png', pdf: 'livros/livro126.pdf', title: 'Livro 126' },
+  { cover: 'capas/livro127.png', pdf: 'livros/livro127.pdf', title: 'Livro 127' },
+  { cover: 'capas/livro128.png', pdf: 'livros/livro128.pdf', title: 'Livro 128' },
+  { cover: 'capas/livro129.png', pdf: 'livros/livro129.pdf', title: 'Livro 129' },
+  { cover: 'capas/livro130.png', pdf: 'livros/livro130.pdf', title: 'Livro 130' },
+  { cover: 'capas/livro131.png', pdf: 'livros/livro131.pdf', title: 'Livro 131' },
+  { cover: 'capas/livro132.png', pdf: 'livros/livro132.pdf', title: 'Livro 132' },
+  { cover: 'capas/livro133.png', pdf: 'livros/livro133.pdf', title: 'Livro 133' },
+  { cover: 'capas/livro134.png', pdf: 'livros/livro134.pdf', title: 'Livro 134' },
+  { cover: 'capas/livro135.png', pdf: 'livros/livro135.pdf', title: 'Livro 135' },
+  { cover: 'capas/livro136.png', pdf: 'livros/livro136.pdf', title: 'Livro 136' },
+  { cover: 'capas/livro137.png', pdf: 'livros/livro137.pdf', title: 'Livro 137' },
+  { cover: 'capas/livro138.png', pdf: 'livros/livro138.pdf', title: 'Livro 138' },
+  { cover: 'capas/livro139.png', pdf: 'livros/livro139.pdf', title: 'Livro 139' },
+  { cover: 'capas/livro140.png', pdf: 'livros/livro140.pdf', title: 'Livro 140' },
+  { cover: 'capas/livro141.png', pdf: 'livros/livro141.pdf', title: 'Livro 141' },
+  { cover: 'capas/livro142.png', pdf: 'livros/livro142.pdf', title: 'Livro 142' },
+  { cover: 'capas/livro143.png', pdf: 'livros/livro143.pdf', title: 'Livro 143' },
+  { cover: 'capas/livro144.png', pdf: 'livros/livro144.pdf', title: 'Livro 144' },
+  { cover: 'capas/livro145.png', pdf: 'livros/livro145.pdf', title: 'Livro 145' },
+  { cover: 'capas/livro146.png', pdf: 'livros/livro146.pdf', title: 'Livro 146' },
+  { cover: 'capas/livro147.png', pdf: 'livros/livro147.pdf', title: 'Livro 147' },
+  { cover: 'capas/livro148.png', pdf: 'livros/livro148.pdf', title: 'Livro 148' },
+  { cover: 'capas/livro149.png', pdf: 'livros/livro149.pdf', title: 'Livro 149' },
+  { cover: 'capas/livro150.png', pdf: 'livros/livro150.pdf', title: 'Livro 150' },
+  { cover: 'capas/livro151.png', pdf: 'livros/livro151.pdf', title: 'Livro 151' },
+  { cover: 'capas/livro152.png', pdf: 'livros/livro152.pdf', title: 'Livro 152' },
+  { cover: 'capas/livro153.png', pdf: 'livros/livro153.pdf', title: 'Livro 153' },
+  { cover: 'capas/livro154.png', pdf: 'livros/livro154.pdf', title: 'Livro 154' },
+  { cover: 'capas/livro155.png', pdf: 'livros/livro155.pdf', title: 'Livro 155' },
+  { cover: 'capas/livro156.png', pdf: 'livros/livro156.pdf', title: 'Livro 156' },
+  { cover: 'capas/livro157.png', pdf: 'livros/livro157.pdf', title: 'Livro 157' },
+  { cover: 'capas/livro158.png', pdf: 'livros/livro158.pdf', title: 'Livro 158' },
+  { cover: 'capas/livro159.png', pdf: 'livros/livro159.pdf', title: 'Livro 159' },
+  { cover: 'capas/livro160.png', pdf: 'livros/livro160.pdf', title: 'Livro 160' },
+  { cover: 'capas/livro161.png', pdf: 'livros/livro161.pdf', title: 'Livro 161' },
+  { cover: 'capas/livro162.png', pdf: 'livros/livro162.pdf', title: 'Livro 162' },
+  { cover: 'capas/livro163.png', pdf: 'livros/livro163.pdf', title: 'Livro 163' },
+  { cover: 'capas/livro164.png', pdf: 'livros/livro164.pdf', title: 'Livro 164' },
+  { cover: 'capas/livro165.png', pdf: 'livros/livro165.pdf', title: 'Livro 165' },
+  { cover: 'capas/livro166.png', pdf: 'livros/livro166.pdf', title: 'Livro 166' },
+  { cover: 'capas/livro167.png', pdf: 'livros/livro167.pdf', title: 'Livro 167' },
+  { cover: 'capas/livro168.png', pdf: 'livros/livro168.pdf', title: 'Livro 168' },
+  { cover: 'capas/livro169.png', pdf: 'livros/livro169.pdf', title: 'Livro 169' },
+  { cover: 'capas/livro170.png', pdf: 'livros/livro170.pdf', title: 'Livro 170' },
+  { cover: 'capas/livro171.png', pdf: 'livros/livro171.pdf', title: 'Livro 171' },
+  { cover: 'capas/livro172.png', pdf: 'livros/livro172.pdf', title: 'Livro 172' },
+  { cover: 'capas/livro173.png', pdf: 'livros/livro173.pdf', title: 'Livro 173' },
+  { cover: 'capas/livro174.png', pdf: 'livros/livro174.pdf', title: 'Livro 174' },
+  { cover: 'capas/livro175.png', pdf: 'livros/livro175.pdf', title: 'Livro 175' },
+  { cover: 'capas/livro176.png', pdf: 'livros/livro176.pdf', title: 'Livro 176' },
+  { cover: 'capas/livro177.png', pdf: 'livros/livro177.pdf', title: 'Livro 177' },
+  { cover: 'capas/livro178.png', pdf: 'livros/livro178.pdf', title: 'Livro 178' },
+  { cover: 'capas/livro179.png', pdf: 'livros/livro179.pdf', title: 'Livro 179' },
+  { cover: 'capas/livro180.png', pdf: 'livros/livro180.pdf', title: 'Livro 180' },
+  { cover: 'capas/livro181.png', pdf: 'livros/livro181.pdf', title: 'Livro 181' },
+  { cover: 'capas/livro182.png', pdf: 'livros/livro182.pdf', title: 'Livro 182' },
+  { cover: 'capas/livro183.png', pdf: 'livros/livro183.pdf', title: 'Livro 183' },
+  { cover: 'capas/livro184.png', pdf: 'livros/livro184.pdf', title: 'Livro 184' },
+  { cover: 'capas/livro185.png', pdf: 'livros/livro185.pdf', title: 'Livro 185' },
+  { cover: 'capas/livro186.png', pdf: 'livros/livro186.pdf', title: 'Livro 186' },
+  { cover: 'capas/livro187.png', pdf: 'livros/livro187.pdf', title: 'Livro 187' },
+  { cover: 'capas/livro188.png', pdf: 'livros/livro188.pdf', title: 'Livro 188' },
+  { cover: 'capas/livro189.png', pdf: 'livros/livro189.pdf', title: 'Livro 189' },
+  { cover: 'capas/livro190.png', pdf: 'livros/livro190.pdf', title: 'Livro 190' },
+  { cover: 'capas/livro191.png', pdf: 'livros/livro191.pdf', title: 'Livro 191' },
+  { cover: 'capas/livro192.png', pdf: 'livros/livro192.pdf', title: 'Livro 192' },
+  { cover: 'capas/livro193.png', pdf: 'livros/livro193.pdf', title: 'Livro 193' },
+  { cover: 'capas/livro194.png', pdf: 'livros/livro194.pdf', title: 'Livro 194' },
+  { cover: 'capas/livro195.png', pdf: 'livros/livro195.pdf', title: 'Livro 195' },
+  { cover: 'capas/livro196.png', pdf: 'livros/livro196.pdf', title: 'Livro 196' },
+  { cover: 'capas/livro197.png', pdf: 'livros/livro197.pdf', title: 'Livro 197' },
+  { cover: 'capas/livro198.png', pdf: 'livros/livro198.pdf', title: 'Livro 198' },
+  { cover: 'capas/livro199.png', pdf: 'livros/livro199.pdf', title: 'Livro 199' },
+  { cover: 'capas/livro200.png', pdf: 'livros/livro200.pdf', title: 'Livro 200' },
+  { cover: 'capas/livro201.png', pdf: 'livros/livro201.pdf', title: 'Livro 201' },
+  { cover: 'capas/livro202.png', pdf: 'livros/livro202.pdf', title: 'Livro 202' },
+  { cover: 'capas/livro203.png', pdf: 'livros/livro203.pdf', title: 'Livro 203' },
+  { cover: 'capas/livro204.png', pdf: 'livros/livro204.pdf', title: 'Livro 204' },
+  { cover: 'capas/livro205.png', pdf: 'livros/livro205.pdf', title: 'Livro 205' },
+  { cover: 'capas/livro206.png', pdf: 'livros/livro206.pdf', title: 'Livro 206' },
+  { cover: 'capas/livro207.png', pdf: 'livros/livro207.pdf', title: 'Livro 207' },
+  { cover: 'capas/livro208.png', pdf: 'livros/livro208.pdf', title: 'Livro 208' },
+  { cover: 'capas/livro209.png', pdf: 'livros/livro209.pdf', title: 'Livro 209' },
+  { cover: 'capas/livro210.png', pdf: 'livros/livro210.pdf', title: 'Livro 210' },
+  { cover: 'capas/livro211.png', pdf: 'livros/livro211.pdf', title: 'Livro 211' },
+  { cover: 'capas/livro212.png', pdf: 'livros/livro212.pdf', title: 'Livro 212' },
+  { cover: 'capas/livro213.png', pdf: 'livros/livro213.pdf', title: 'Livro 213' },
+  { cover: 'capas/livro214.png', pdf: 'livros/livro214.pdf', title: 'Livro 214' },
+  { cover: 'capas/livro215.png', pdf: 'livros/livro215.pdf', title: 'Livro 215' },
+  { cover: 'capas/livro216.png', pdf: 'livros/livro216.pdf', title: 'Livro 216' },
+  { cover: 'capas/livro217.png', pdf: 'livros/livro217.pdf', title: 'Livro 217' },
+  { cover: 'capas/livro218.png', pdf: 'livros/livro218.pdf', title: 'Livro 218' },
+  { cover: 'capas/livro219.png', pdf: 'livros/livro219.pdf', title: 'Livro 219' },
+  { cover: 'capas/livro220.png', pdf: 'livros/livro220.pdf', title: 'Livro 220' },
+  { cover: 'capas/livro221.png', pdf: 'livros/livro221.pdf', title: 'Livro 221' },
+  { cover: 'capas/livro222.png', pdf: 'livros/livro222.pdf', title: 'Livro 222' },
+  { cover: 'capas/livro223.png', pdf: 'livros/livro223.pdf', title: 'Livro 223' },
+  { cover: 'capas/livro224.png', pdf: 'livros/livro224.pdf', title: 'Livro 224' },
+  { cover: 'capas/livro225.png', pdf: 'livros/livro225.pdf', title: 'Livro 225' },
+  { cover: 'capas/livro226.png', pdf: 'livros/livro226.pdf', title: 'Livro 226' },
+  { cover: 'capas/livro227.png', pdf: 'livros/livro227.pdf', title: 'Livro 227' },
+  { cover: 'capas/livro228.png', pdf: 'livros/livro228.pdf', title: 'Livro 228' },
+  { cover: 'capas/livro229.png', pdf: 'livros/livro229.pdf', title: 'Livro 229' },
+  { cover: 'capas/livro230.png', pdf: 'livros/livro230.pdf', title: 'Livro 230' },
+  { cover: 'capas/livro231.png', pdf: 'livros/livro231.pdf', title: 'Livro 231' },
+  { cover: 'capas/livro232.png', pdf: 'livros/livro232.pdf', title: 'Livro 232' },
+  { cover: 'capas/livro233.png', pdf: 'livros/livro233.pdf', title: 'Livro 233' },
+  { cover: 'capas/livro234.png', pdf: 'livros/livro234.pdf', title: 'Livro 234' },
+  { cover: 'capas/livro235.png', pdf: 'livros/livro235.pdf', title: 'Livro 235' },
+  { cover: 'capas/livro236.png', pdf: 'livros/livro236.pdf', title: 'Livro 236' },
+  { cover: 'capas/livro237.png', pdf: 'livros/livro237.pdf', title: 'Livro 237' },
+  { cover: 'capas/livro238.png', pdf: 'livros/livro238.pdf', title: 'Livro 238' },
+  { cover: 'capas/livro239.png', pdf: 'livros/livro239.pdf', title: 'Livro 239' },
+  { cover: 'capas/livro240.png', pdf: 'livros/livro240.pdf', title: 'Livro 240' },
+  { cover: 'capas/livro241.png', pdf: 'livros/livro241.pdf', title: 'Livro 241' },
+  { cover: 'capas/livro242.png', pdf: 'livros/livro242.pdf', title: 'Livro 242' },
+  { cover: 'capas/livro243.png', pdf: 'livros/livro243.pdf', title: 'Livro 243' },
+  { cover: 'capas/livro244.png', pdf: 'livros/livro244.pdf', title: 'Livro 244' },
+  { cover: 'capas/livro245.png', pdf: 'livros/livro245.pdf', title: 'Livro 245' },
+  { cover: 'capas/livro246.png', pdf: 'livros/livro246.pdf', title: 'Livro 246' },
+  { cover: 'capas/livro247.png', pdf: 'livros/livro247.pdf', title: 'Livro 247' },
+  { cover: 'capas/livro248.png', pdf: 'livros/livro248.pdf', title: 'Livro 248' },
+  { cover: 'capas/livro249.png', pdf: 'livros/livro249.pdf', title: 'Livro 249' },
+  { cover: 'capas/livro250.png', pdf: 'livros/livro250.pdf', title: 'Livro 250' },
+  { cover: 'capas/livro251.png', pdf: 'livros/livro251.pdf', title: 'Livro 251' },
+  { cover: 'capas/livro252.png', pdf: 'livros/livro252.pdf', title: 'Livro 252' },
+  { cover: 'capas/livro253.png', pdf: 'livros/livro253.pdf', title: 'Livro 253' },
+  { cover: 'capas/livro254.png', pdf: 'livros/livro254.pdf', title: 'Livro 254' },
+  { cover: 'capas/livro255.png', pdf: 'livros/livro255.pdf', title: 'Livro 255' },
+  { cover: 'capas/livro256.png', pdf: 'livros/livro256.pdf', title: 'Livro 256' },
+  { cover: 'capas/livro257.png', pdf: 'livros/livro257.pdf', title: 'Livro 257' },
+  { cover: 'capas/livro258.png', pdf: 'livros/livro258.pdf', title: 'Livro 258' },
+  { cover: 'capas/livro259.png', pdf: 'livros/livro259.pdf', title: 'Livro 259' },
+  { cover: 'capas/livro260.png', pdf: 'livros/livro260.pdf', title: 'Livro 260' },
+  { cover: 'capas/livro261.png', pdf: 'livros/livro261.pdf', title: 'Livro 261' },
+  { cover: 'capas/livro262.png', pdf: 'livros/livro262.pdf', title: 'Livro 262' },
+  { cover: 'capas/livro263.png', pdf: 'livros/livro263.pdf', title: 'Livro 263' },
+  { cover: 'capas/livro264.png', pdf: 'livros/livro264.pdf', title: 'Livro 264' },
+  { cover: 'capas/livro265.png', pdf: 'livros/livro265.pdf', title: 'Livro 265' },
+  { cover: 'capas/livro266.png', pdf: 'livros/livro266.pdf', title: 'Livro 266' },
+  { cover: 'capas/livro267.png', pdf: 'livros/livro267.pdf', title: 'Livro 267' },
+  { cover: 'capas/livro268.png', pdf: 'livros/livro268.pdf', title: 'Livro 268' },
+  { cover: 'capas/livro269.png', pdf: 'livros/livro269.pdf', title: 'Livro 269' },
+  { cover: 'capas/livro270.png', pdf: 'livros/livro270.pdf', title: 'Livro 270' },
+  { cover: 'capas/livro271.png', pdf: 'livros/livro271.pdf', title: 'Livro 271' },
+  { cover: 'capas/livro272.png', pdf: 'livros/livro272.pdf', title: 'Livro 272' },
+  { cover: 'capas/livro273.png', pdf: 'livros/livro273.pdf', title: 'Livro 273' },
+  { cover: 'capas/livro274.png', pdf: 'livros/livro274.pdf', title: 'Livro 274' },
+  { cover: 'capas/livro275.png', pdf: 'livros/livro275.pdf', title: 'Livro 275' },
+  { cover: 'capas/livro276.png', pdf: 'livros/livro276.pdf', title: 'Livro 276' },
+  { cover: 'capas/livro277.png', pdf: 'livros/livro277.pdf', title: 'Livro 277' },
+  { cover: 'capas/livro278.png', pdf: 'livros/livro278.pdf', title: 'Livro 278' },
+  { cover: 'capas/livro279.png', pdf: 'livros/livro279.pdf', title: 'Livro 279' },
+  { cover: 'capas/livro280.png', pdf: 'livros/livro280.pdf', title: 'Livro 280' },
+  { cover: 'capas/livro281.png', pdf: 'livros/livro281.pdf', title: 'Livro 281' },
+  { cover: 'capas/livro282.png', pdf: 'livros/livro282.pdf', title: 'Livro 282' },
+  { cover: 'capas/livro283.png', pdf: 'livros/livro283.pdf', title: 'Livro 283' },
+  { cover: 'capas/livro284.png', pdf: 'livros/livro284.pdf', title: 'Livro 284' },
+  { cover: 'capas/livro285.png', pdf: 'livros/livro285.pdf', title: 'Livro 285' },
+  { cover: 'capas/livro286.png', pdf: 'livros/livro286.pdf', title: 'Livro 286' },
+  { cover: 'capas/livro287.png', pdf: 'livros/livro287.pdf', title: 'Livro 287' },
+  { cover: 'capas/livro288.png', pdf: 'livros/livro288.pdf', title: 'Livro 288' },
+  { cover: 'capas/livro289.png', pdf: 'livros/livro289.pdf', title: 'Livro 289' },
+  { cover: 'capas/livro290.png', pdf: 'livros/livro290.pdf', title: 'Livro 290' },
+  { cover: 'capas/livro291.png', pdf: 'livros/livro291.pdf', title: 'Livro 291' },
+  { cover: 'capas/livro292.png', pdf: 'livros/livro292.pdf', title: 'Livro 292' },
+  { cover: 'capas/livro293.png', pdf: 'livros/livro293.pdf', title: 'Livro 293' },
+  { cover: 'capas/livro294.png', pdf: 'livros/livro294.pdf', title: 'Livro 294' },
+  { cover: 'capas/livro295.png', pdf: 'livros/livro295.pdf', title: 'Livro 295' },
+  { cover: 'capas/livro296.png', pdf: 'livros/livro296.pdf', title: 'Livro 296' },
+  { cover: 'capas/livro297.png', pdf: 'livros/livro297.pdf', title: 'Livro 297' },
+  { cover: 'capas/livro298.png', pdf: 'livros/livro298.pdf', title: 'Livro 298' },
+  { cover: 'capas/livro299.png', pdf: 'livros/livro299.pdf', title: 'Livro 299' },
+  { cover: 'capas/livro300.png', pdf: 'livros/livro300.pdf', title: 'Livro 300' },
+  { cover: 'capas/livro301.png', pdf: 'livros/livro301.pdf', title: 'Livro 301' },
+  { cover: 'capas/livro302.png', pdf: 'livros/livro302.pdf', title: 'Livro 302' },
+  { cover: 'capas/livro303.png', pdf: 'livros/livro303.pdf', title: 'Livro 303' },
+  { cover: 'capas/livro304.png', pdf: 'livros/livro304.pdf', title: 'Livro 304' },
+  { cover: 'capas/livro305.png', pdf: 'livros/livro305.pdf', title: 'Livro 305' },
+  { cover: 'capas/livro306.png', pdf: 'livros/livro306.pdf', title: 'Livro 306' },
+  { cover: 'capas/livro307.png', pdf: 'livros/livro307.pdf', title: 'Livro 307' },
+  { cover: 'capas/livro308.png', pdf: 'livros/livro308.pdf', title: 'Livro 308' },
+  { cover: 'capas/livro309.png', pdf: 'livros/livro309.pdf', title: 'Livro 309' },
+  { cover: 'capas/livro310.png', pdf: 'livros/livro310.pdf', title: 'Livro 310' },
+  { cover: 'capas/livro311.png', pdf: 'livros/livro311.pdf', title: 'Livro 311' },
+  { cover: 'capas/livro312.png', pdf: 'livros/livro312.pdf', title: 'Livro 312' },
+  { cover: 'capas/livro313.png', pdf: 'livros/livro313.pdf', title: 'Livro 313' },
+  { cover: 'capas/livro314.png', pdf: 'livros/livro314.pdf', title: 'Livro 314' },
+  { cover: 'capas/livro315.png', pdf: 'livros/livro315.pdf', title: 'Livro 315' },
+  { cover: 'capas/livro316.png', pdf: 'livros/livro316.pdf', title: 'Livro 316' },
+  { cover: 'capas/livro317.png', pdf: 'livros/livro317.pdf', title: 'Livro 317' },
+  { cover: 'capas/livro318.png', pdf: 'livros/livro318.pdf', title: 'Livro 318' },
+  { cover: 'capas/livro319.png', pdf: 'livros/livro319.pdf', title: 'Livro 319' },
+  { cover: 'capas/livro320.png', pdf: 'livros/livro320.pdf', title: 'Livro 320' },
+  { cover: 'capas/livro321.png', pdf: 'livros/livro321.pdf', title: 'Livro 321' },
+  { cover: 'capas/livro322.png', pdf: 'livros/livro322.pdf', title: 'Livro 322' },
+  { cover: 'capas/livro323.png', pdf: 'livros/livro323.pdf', title: 'Livro 323' },
+  { cover: 'capas/livro324.png', pdf: 'livros/livro324.pdf', title: 'Livro 324' },
+  { cover: 'capas/livro325.png', pdf: 'livros/livro325.pdf', title: 'Livro 325' },
+  { cover: 'capas/livro326.png', pdf: 'livros/livro326.pdf', title: 'Livro 326' },
+  { cover: 'capas/livro327.png', pdf: 'livros/livro327.pdf', title: 'Livro 327' },
+  { cover: 'capas/livro328.png', pdf: 'livros/livro328.pdf', title: 'Livro 328' },
+  { cover: 'capas/livro329.png', pdf: 'livros/livro329.pdf', title: 'Livro 329' },
+  { cover: 'capas/livro330.png', pdf: 'livros/livro330.pdf', title: 'Livro 330' },
+  { cover: 'capas/livro331.png', pdf: 'livros/livro331.pdf', title: 'Livro 331' },
+  { cover: 'capas/livro332.png', pdf: 'livros/livro332.pdf', title: 'Livro 332' },
+  { cover: 'capas/livro333.png', pdf: 'livros/livro333.pdf', title: 'Livro 333' },
+  { cover: 'capas/livro334.png', pdf: 'livros/livro334.pdf', title: 'Livro 334' },
+  { cover: 'capas/livro335.png', pdf: 'livros/livro335.pdf', title: 'Livro 335' },
+  { cover: 'capas/livro336.png', pdf: 'livros/livro336.pdf', title: 'Livro 336' },
+  { cover: 'capas/livro337.png', pdf: 'livros/livro337.pdf', title: 'Livro 337' },
+  { cover: 'capas/livro338.png', pdf: 'livros/livro338.pdf', title: 'Livro 338' },
+  { cover: 'capas/livro339.png', pdf: 'livros/livro339.pdf', title: 'Livro 339' },
+  { cover: 'capas/livro340.png', pdf: 'livros/livro340.pdf', title: 'Livro 340' },
+  { cover: 'capas/livro341.png', pdf: 'livros/livro341.pdf', title: 'Livro 341' },
+  { cover: 'capas/livro342.png', pdf: 'livros/livro342.pdf', title: 'Livro 342' },
+  { cover: 'capas/livro343.png', pdf: 'livros/livro343.pdf', title: 'Livro 343' },
+  { cover: 'capas/livro344.png', pdf: 'livros/livro344.pdf', title: 'Livro 344' },
+  { cover: 'capas/livro345.png', pdf: 'livros/livro345.pdf', title: 'Livro 345' },
+  { cover: 'capas/livro346.png', pdf: 'livros/livro346.pdf', title: 'Livro 346' },
+  { cover: 'capas/livro347.png', pdf: 'livros/livro347.pdf', title: 'Livro 347' },
+  { cover: 'capas/livro348.png', pdf: 'livros/livro348.pdf', title: 'Livro 348' },
+  { cover: 'capas/livro349.png', pdf: 'livros/livro349.pdf', title: 'Livro 349' },
+  { cover: 'capas/livro350.png', pdf: 'livros/livro350.pdf', title: 'Livro 350' },
+  { cover: 'capas/livro351.png', pdf: 'livros/livro351.pdf', title: 'Livro 351' },
+  { cover: 'capas/livro352.png', pdf: 'livros/livro352.pdf', title: 'Livro 352' },
+  { cover: 'capas/livro353.png', pdf: 'livros/livro353.pdf', title: 'Livro 353' },
+  { cover: 'capas/livro354.png', pdf: 'livros/livro354.pdf', title: 'Livro 354' },
+  { cover: 'capas/livro355.png', pdf: 'livros/livro355.pdf', title: 'Livro 355' },
+  { cover: 'capas/livro356.png', pdf: 'livros/livro356.pdf', title: 'Livro 356' },
+  { cover: 'capas/livro357.png', pdf: 'livros/livro357.pdf', title: 'Livro 357' },
+  { cover: 'capas/livro358.png', pdf: 'livros/livro358.pdf', title: 'Livro 358' },
+  { cover: 'capas/livro359.png', pdf: 'livros/livro359.pdf', title: 'Livro 359' },
+  { cover: 'capas/livro360.png', pdf: 'livros/livro360.pdf', title: 'Livro 360' },
+  { cover: 'capas/livro361.png', pdf: 'livros/livro361.pdf', title: 'Livro 361' },
+  { cover: 'capas/livro362.png', pdf: 'livros/livro362.pdf', title: 'Livro 362' },
+  { cover: 'capas/livro363.png', pdf: 'livros/livro363.pdf', title: 'Livro 363' },
+  { cover: 'capas/livro364.png', pdf: 'livros/livro364.pdf', title: 'Livro 364' },
+  { cover: 'capas/livro365.png', pdf: 'livros/livro365.pdf', title: 'Livro 365' },
+  { cover: 'capas/livro366.png', pdf: 'livros/livro366.pdf', title: 'Livro 366' },
+  { cover: 'capas/livro367.png', pdf: 'livros/livro367.pdf', title: 'Livro 367' },
+  { cover: 'capas/livro368.png', pdf: 'livros/livro368.pdf', title: 'Livro 368' },
+  { cover: 'capas/livro369.png', pdf: 'livros/livro369.pdf', title: 'Livro 369' },
+  { cover: 'capas/livro370.png', pdf: 'livros/livro370.pdf', title: 'Livro 370' },
+  { cover: 'capas/livro371.png', pdf: 'livros/livro371.pdf', title: 'Livro 371' },
+  { cover: 'capas/livro372.png', pdf: 'livros/livro372.pdf', title: 'Livro 372' },
+  { cover: 'capas/livro373.png', pdf: 'livros/livro373.pdf', title: 'Livro 373' },
+  { cover: 'capas/livro374.png', pdf: 'livros/livro374.pdf', title: 'Livro 374' },
+  { cover: 'capas/livro375.png', pdf: 'livros/livro375.pdf', title: 'Livro 375' },
+  { cover: 'capas/livro376.png', pdf: 'livros/livro376.pdf', title: 'Livro 376' },
+  { cover: 'capas/livro377.png', pdf: 'livros/livro377.pdf', title: 'Livro 377' },
+  { cover: 'capas/livro378.png', pdf: 'livros/livro378.pdf', title: 'Livro 378' },
+  { cover: 'capas/livro379.png', pdf: 'livros/livro379.pdf', title: 'Livro 379' },
+  { cover: 'capas/livro380.png', pdf: 'livros/livro380.pdf', title: 'Livro 380' },
+  { cover: 'capas/livro381.png', pdf: 'livros/livro381.pdf', title: 'Livro 381' },
+  { cover: 'capas/livro382.png', pdf: 'livros/livro382.pdf', title: 'Livro 382' },
+  { cover: 'capas/livro383.png', pdf: 'livros/livro383.pdf', title: 'Livro 383' },
+  { cover: 'capas/livro384.png', pdf: 'livros/livro384.pdf', title: 'Livro 384' },
+  { cover: 'capas/livro385.png', pdf: 'livros/livro385.pdf', title: 'Livro 385' },
+  { cover: 'capas/livro386.png', pdf: 'livros/livro386.pdf', title: 'Livro 386' },
+  { cover: 'capas/livro387.png', pdf: 'livros/livro387.pdf', title: 'Livro 387' },
+  { cover: 'capas/livro388.png', pdf: 'livros/livro388.pdf', title: 'Livro 388' },
+  { cover: 'capas/livro389.png', pdf: 'livros/livro389.pdf', title: 'Livro 389' },
+  { cover: 'capas/livro390.png', pdf: 'livros/livro390.pdf', title: 'Livro 390' },
+  { cover: 'capas/livro391.png', pdf: 'livros/livro391.pdf', title: 'Livro 391' },
+  { cover: 'capas/livro392.png', pdf: 'livros/livro392.pdf', title: 'Livro 392' },
+  { cover: 'capas/livro393.png', pdf: 'livros/livro393.pdf', title: 'Livro 393' },
+  { cover: 'capas/livro394.png', pdf: 'livros/livro394.pdf', title: 'Livro 394' },
+  { cover: 'capas/livro395.png', pdf: 'livros/livro395.pdf', title: 'Livro 395' },
+  { cover: 'capas/livro396.png', pdf: 'livros/livro396.pdf', title: 'Livro 396' },
+  { cover: 'capas/livro397.png', pdf: 'livros/livro397.pdf', title: 'Livro 397' },
+  { cover: 'capas/livro398.png', pdf: 'livros/livro398.pdf', title: 'Livro 398' },
+  { cover: 'capas/livro399.png', pdf: 'livros/livro399.pdf', title: 'Livro 399' },
+  { cover: 'capas/livro400.png', pdf: 'livros/livro400.pdf', title: 'Livro 400' },
+  { cover: 'capas/livro401.png', pdf: 'livros/livro401.pdf', title: 'Livro 401' },
+  { cover: 'capas/livro402.png', pdf: 'livros/livro402.pdf', title: 'Livro 402' },
+  { cover: 'capas/livro403.png', pdf: 'livros/livro403.pdf', title: 'Livro 403' },
+  { cover: 'capas/livro404.png', pdf: 'livros/livro404.pdf', title: 'Livro 404' },
+  { cover: 'capas/livro405.png', pdf: 'livros/livro405.pdf', title: 'Livro 405' },
+  { cover: 'capas/livro406.png', pdf: 'livros/livro406.pdf', title: 'Livro 406' },
+  { cover: 'capas/livro407.png', pdf: 'livros/livro407.pdf', title: 'Livro 407' },
+  { cover: 'capas/livro408.png', pdf: 'livros/livro408.pdf', title: 'Livro 408' },
+  { cover: 'capas/livro409.png', pdf: 'livros/livro409.pdf', title: 'Livro 409' },
+  { cover: 'capas/livro410.png', pdf: 'livros/livro410.pdf', title: 'Livro 410' },
+  { cover: 'capas/livro411.png', pdf: 'livros/livro411.pdf', title: 'Livro 411' },
+  { cover: 'capas/livro412.png', pdf: 'livros/livro412.pdf', title: 'Livro 412' },
+  { cover: 'capas/livro413.png', pdf: 'livros/livro413.pdf', title: 'Livro 413' },
+  { cover: 'capas/livro414.png', pdf: 'livros/livro414.pdf', title: 'Livro 414' },
+  { cover: 'capas/livro415.png', pdf: 'livros/livro415.pdf', title: 'Livro 415' },
+  { cover: 'capas/livro416.png', pdf: 'livros/livro416.pdf', title: 'Livro 416' },
+  { cover: 'capas/livro417.png', pdf: 'livros/livro417.pdf', title: 'Livro 417' },
+  { cover: 'capas/livro418.png', pdf: 'livros/livro418.pdf', title: 'Livro 418' },
+  { cover: 'capas/livro419.png', pdf: 'livros/livro419.pdf', title: 'Livro 419' },
+  { cover: 'capas/livro420.png', pdf: 'livros/livro420.pdf', title: 'Livro 420' },
+  { cover: 'capas/livro421.png', pdf: 'livros/livro421.pdf', title: 'Livro 421' },
+  { cover: 'capas/livro422.png', pdf: 'livros/livro422.pdf', title: 'Livro 422' },
+  { cover: 'capas/livro423.png', pdf: 'livros/livro423.pdf', title: 'Livro 423' },
+  { cover: 'capas/livro424.png', pdf: 'livros/livro424.pdf', title: 'Livro 424' },
+  { cover: 'capas/livro425.png', pdf: 'livros/livro425.pdf', title: 'Livro 425' },
+  { cover: 'capas/livro426.png', pdf: 'livros/livro426.pdf', title: 'Livro 426' },
+  { cover: 'capas/livro427.png', pdf: 'livros/livro427.pdf', title: 'Livro 427' },
+  { cover: 'capas/livro428.png', pdf: 'livros/livro428.pdf', title: 'Livro 428' },
+  { cover: 'capas/livro429.png', pdf: 'livros/livro429.pdf', title: 'Livro 429' },
+  { cover: 'capas/livro430.png', pdf: 'livros/livro430.pdf', title: 'Livro 430' },
+  { cover: 'capas/livro431.png', pdf: 'livros/livro431.pdf', title: 'Livro 431' },
+  { cover: 'capas/livro432.png', pdf: 'livros/livro432.pdf', title: 'Livro 432' },
+  { cover: 'capas/livro433.png', pdf: 'livros/livro433.pdf', title: 'Livro 433' },
+  { cover: 'capas/livro434.png', pdf: 'livros/livro434.pdf', title: 'Livro 434' },
+  { cover: 'capas/livro435.png', pdf: 'livros/livro435.pdf', title: 'Livro 435' },
+  { cover: 'capas/livro436.png', pdf: 'livros/livro436.pdf', title: 'Livro 436' },
+  { cover: 'capas/livro437.png', pdf: 'livros/livro437.pdf', title: 'Livro 437' },
+  { cover: 'capas/livro438.png', pdf: 'livros/livro438.pdf', title: 'Livro 438' },
+  { cover: 'capas/livro439.png', pdf: 'livros/livro439.pdf', title: 'Livro 439' }
+      ];
+      function createBookCovers() {
+  const bookCount = Math.min(430, bookData.length);
+  for (let i = 0; i < bookCount; i++) {
+          const randomFactor = Math.pow(Math.random(), 0.25);
+          const radius = 4 + randomFactor * 22;
+          const angle = Math.random() * Math.PI * 2;
+          const height = (Math.random() - 0.5) * Math.max(0.08, radius * 0.04);
+          const x = radius * Math.cos(angle);
+          const y = height;
+          const z = radius * Math.sin(angle);
+          const idx = Math.floor(Math.random() * bookData.length);
+    const bookInfo = bookData.splice(idx, 1)[0];
+const loader = new THREE.TextureLoader();
+const texture = loader.load(
+  bookInfo.cover,
+  function (tex) {
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+  },
+  undefined,
+  function (error) {
+    console.warn(`Erro ao carregar capa: ${bookInfo.cover}`, error);
+  }
+);
+const spriteMaterial = new THREE.SpriteMaterial({ 
+  map: texture,
+  transparent: true,
+  opacity: 0.9,
+  depthTest: true,
+  depthWrite: false,
+  alphaTest: 0.01
+});
+const sprite = new THREE.Sprite(spriteMaterial);
+sprite.position.set(x, y, z);
+sprite.scale.set(0.5, 0.5, 1);
+sprite.renderOrder = 1500;
+          const bookObject = {
+            sprite: sprite,
+            originalScale: { x: 0.3, y: 0.3 },
+            radius: radius,
+            angle: angle,
+            baseHeight: height,
+            orbitalSpeed: Math.sqrt(15 / radius) / radius * 0.2,
+            pdf: bookInfo.pdf,
+            title: bookInfo.title,
+            isHovered: false,
+            wobbleSpeed: 0.008 + Math.random() * 0.025,
+            phase: Math.random() * Math.PI * 2
+          };
+          bookSystem.books.push(bookObject);
+          scene.add(sprite);
+        }
+        document.getElementById('book-count').textContent = bookCount;
+      }
+      function updateBookInteraction(event) {
+  bookSystem.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  bookSystem.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  bookSystem.raycaster.setFromCamera(bookSystem.mouse, camera);
+  const sprites = bookSystem.books.map(b => b.sprite);
+  const intersects = bookSystem.raycaster.intersectObjects(sprites);
+  if (intersects.length > 0) {
+    const newSprite = intersects[0].object;
+    const newBook = bookSystem.books.find(b => b.sprite === newSprite);
+    if (bookSystem.hoveredBook !== newBook) {
+      if (bookSystem.hoveredBook) bookSystem.hoveredBook.isHovered = false;
+      bookSystem.hoveredBook = newBook;
+      if (newBook) newBook.isHovered = true;
+    }
+    document.body.style.cursor = 'pointer';
+  } else {
+    if (bookSystem.hoveredBook) bookSystem.hoveredBook.isHovered = false;
+    bookSystem.hoveredBook = null;
+    document.body.style.cursor = 'default';
+  }
+}
+      function handleBookClick(event) {
+	   if (coversMuted) return;
+	    if (shouldBlockBookActions()) return;
+  bookSystem.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  bookSystem.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  bookSystem.raycaster.setFromCamera(bookSystem.mouse, camera);
+  const intersects = bookSystem.raycaster.intersectObjects(bookSystem.books.map(b => b.sprite));
+  if (intersects.length > 0) {
+    const clickedBook = bookSystem.books.find(b => b.sprite === intersects[0].object);
+    if (clickedBook) {
+      if (selectedBook === clickedBook) {
+	  if (coversMuted) return;
+        window.open(clickedBook.pdf, "_blank");
+        warp.active = false;
+      } else {
+	  if (coversMuted) return;
+        startWarpTo(clickedBook);
+      }
+    }
+  }
+}
+      const blackHoleVertexShader = `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position, 1.0);
+        }
+      `;
+      const blackHoleFragmentShader = `
+        uniform float uTime;
+        uniform vec3 uCameraPosition;
+        uniform bool uWarpSpace;
+        uniform vec2 uResolution;
+        uniform float uMixFactor;
+		 uniform vec3 uCamForward;
+  uniform vec3 uCamRight;
+  uniform vec3 uCamUp;
+  uniform vec2 uBHScreen;
+        varying vec2 vUv;
+        const float PI = 3.14159265359;
+        float hash(vec3 p) {
+          p = fract(p * 0.3183099 + 0.1);
+          p *= 17.0;
+          return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+        }
+        vec3 blackbody(float temp) {
+          temp = max(temp, 10.0);
+          temp *= 100.0;
+          float r, g, b;
+          if (temp < 3300.0) {
+            r = 1.0;
+            g = max(0.0, 0.39 * pow(max(temp / 1000.0, 0.1), -0.63));
+            b = 0.0;
+          } else if (temp < 6600.0) {
+            r = 1.0;
+            g = max(0.0, 0.39 * pow(max(temp / 1000.0, 0.1), -0.63));
+            b = max(0.0, 1.15 * pow(max(temp / 1000.0 - 19.0, 0.1), -1.5));
+          } else {
+            r = max(0.0, 1.35 * pow(max(temp / 1000.0, 0.1), -0.55));
+            g = max(0.0, 1.00 * pow(max(temp / 1000.0, 0.1), -0.32));
+            b = 1.0;
+          }
+          return vec3(r, g, b);
+        }
+        vec3 calculateStars(vec3 worldDir) {
+          float angleY = uTime * 0.002;
+          mat3 rotation = mat3(cos(angleY), 0, sin(angleY), 
+                              0, 1, 0, 
+                              -sin(angleY), 0, cos(angleY));
+          worldDir = rotation * worldDir;
+          const float scale = 384.0;
+          const float coverage = 0.007;
+          const float maxLuminance = 0.04;
+          vec3 p = worldDir * scale;
+          vec3 i = floor(p);
+          vec3 f = p - i;
+          float r = dot(f - 0.5, f - 0.5);
+          float hashValue = hash(i);
+          float starFactor = step(1.0 - coverage, hashValue);
+          float brightness = maxLuminance * smoothstep(0.25, 0.0, r) * starFactor;
+          float temp = 4000.0 + hashValue * 4000.0;
+          return brightness * blackbody(temp);
+        }
+        void main() {
+  vec2 screenPos = vUv * 2.0 - 1.0;
+  float aspect = uResolution.x / uResolution.y;
+  screenPos.x *= aspect;
+  screenPos -= vec2(uBHScreen.x * aspect, uBHScreen.y);
+  float distance = length(uCameraPosition);
+  vec3 forward = normalize(uCamForward);
+  vec3 right   = normalize(uCamRight);
+  vec3 up      = normalize(uCamUp);
+          float fov = 0.8 + (1.0 / (distance * 0.1 + 0.1));
+          vec3 rayDir = normalize(forward + screenPos.x * right * fov + screenPos.y * up * fov);
+          vec3 center = vec3(0.0);
+          float distToCenter = length(uCameraPosition);
+          float gravitationalLensing = 1.0 / (distToCenter * 0.1 + 1.0);
+          vec3 result = vec3(0.0);
+          vec3 rayPos = uCameraPosition;
+          const float steps = 20.0;
+          const float stepSize = 0.2;
+          for (float i = 0.0; i < steps; i++) {
+            rayPos += rayDir * stepSize;
+            float r = length(rayPos.xz);
+            float h = rayPos.y;
+            if (r > 2.5 && r < 4.0 && abs(h) < 0.1) {
+              float intensity = 1.0 / (r * r + 0.1);
+              float temp = 50.0 / r;
+              vec3 glow = blackbody(temp) * intensity * 0.1;
+              result += glow;
+            }
+            if (length(rayPos) < 2.7) {
+              result = vec3(0.0);
+              break;
+            }
+          }
+          vec3 stars = calculateStars(rayDir);
+          vec3 color = stars + result;
+          color = color / (1.0 + color);
+          color = pow(color, vec3(1.0/2.2));
+          gl_FragColor = vec4(color * uMixFactor, 1.0);
+        }
+      `;
+      const blackHoleMaterial = new THREE.ShaderMaterial({
+        vertexShader: blackHoleVertexShader,
+        fragmentShader: blackHoleFragmentShader,
+        uniforms: {
+          uTime: { value: 0 },
+          uCameraPosition: { value: virtualCamera },
+          uWarpSpace: { value: true },
+          uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+		    uCamForward: { value: new THREE.Vector3() },
+    uCamRight:   { value: new THREE.Vector3() },
+    uCamUp:      { value: new THREE.Vector3() },
+    uBHScreen:   { value: new THREE.Vector2(0,0) },
+          uMixFactor: { value: 0.6 }
+        },
+        side: THREE.DoubleSide,
+        transparent: true,
+        blending: THREE.AdditiveBlending
+      });
+      const shaderGeometry = new THREE.PlaneGeometry(2, 2);
+      const blackHolePlane = new THREE.Mesh(shaderGeometry, blackHoleMaterial);
+      shaderScene.add(blackHolePlane);
+function createGalacticArms() {
+  const armGeometry = new THREE.BufferGeometry();
+  const armVertices = [];
+  const armColors = [];
+  const armSizes = [];
+  const armData = [];
+  const armCount = 2;
+  const particlesPerArm = 6000;
+  const maxRadius = 150;
+  for (let arm = 0; armCount > arm ? true : false; arm++) {
+    const armAngleOffset = (arm / armCount) * Math.PI * 2;
+    for (let i = 0; i < particlesPerArm; i++) {
+      const t = i / particlesPerArm;
+      const radius = 8 + t * maxRadius;
+      const spiralTightness = 1.5;
+      const angle = armAngleOffset - t * Math.PI * 6 * spiralTightness;
+      const armWidth = 2 + Math.sin(t * Math.PI * 8) * 1.5;
+      const randomOffset = (Math.random() - 0.5) * armWidth;
+      const perpAngle = angle + Math.PI / 2;
+      const x = radius * Math.cos(angle) + randomOffset * Math.cos(perpAngle);
+      const z = radius * Math.sin(angle) + randomOffset * Math.sin(perpAngle);
+      const y = (Math.random() - 0.5) * Math.max(0.5, radius * 0.03);
+      armVertices.push(x, y, z);
+const cRoxo = new THREE.Color(0x7A2CF0);
+const cRosa = new THREE.Color(0xFF00AA);
+const g = Math.pow(t, 0.85);
+const col = cRoxo.clone().lerp(cRosa, g);
+armColors.push(col.r, col.g, col.b);
+      armSizes.push(0.2 + Math.random() * 0.6);
+      armData.push({
+        baseRadius: radius,
+        baseAngle: angle,
+        armIndex: arm,
+        spiralPosition: t,
+        orbitalSpeed: 0.15 / Math.sqrt(radius / 8.0),
+        randomPhase: Math.random() * Math.PI * 2
+      });
+    }
+  }
+  armGeometry.setAttribute('position', new THREE.Float32BufferAttribute(armVertices, 3));
+  armGeometry.setAttribute('color',    new THREE.Float32BufferAttribute(armColors, 3));
+  armGeometry.setAttribute('size',     new THREE.Float32BufferAttribute(armSizes, 1));
+  const armMaterial = new THREE.ShaderMaterial({
+    transparent: true,
+    depthTest: true,  
+    depthWrite: false, 
+    blending: THREE.AdditiveBlending,
+    vertexColors: true,
+    vertexShader: `
+      attribute float size;
+      varying vec3 vColor;
+      varying float vDistance;
+      void main() {
+        vColor = color;
+        vDistance = length(position);
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = size * (100.0 / -mvPosition.z);
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vColor;
+      varying float vDistance;
+      void main() {
+        vec2 center = gl_PointCoord - vec2(0.5);
+        float dist = length(center);
+        if (dist > 0.5) discard;
+        float opacity = (1.0 - smoothstep(0.0, 0.5, dist)) * 0.4;
+        float core    = (1.0 - smoothstep(0.0, 0.2, dist)) * 0.6;
+        float maxDistance = 150.0;
+        float fadeFactor = 1.0 - clamp(vDistance / maxDistance, 0.0, 1.0);
+        float a = (opacity + core) * fadeFactor;
+        vec3 col = vColor * a;
+        gl_FragColor = vec4(col, a);
+      }
+    `
+  });
+  armMaterial.premultipliedAlpha = true;
+  armMaterial.needsUpdate = true;
+  const galacticArms = new THREE.Points(armGeometry, armMaterial);
+  galacticArms.renderOrder = 800;
+  scene.add(galacticArms);
+  return { mesh: galacticArms, geometry: armGeometry, data: armData };
+}
+const galacticArmSystem = createGalacticArms();
+      function createStarField() {
+        const starGeometry = new THREE.BufferGeometry();
+        const starVertices = [];
+        const starColors = [];
+        for (let i = 0; i < 4000; i++) {
+          const radius = 500 + Math.random() * 1500;
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.random() * Math.PI;
+          const x = radius * Math.sin(phi) * Math.cos(theta);
+          const y = radius * Math.sin(phi) * Math.sin(theta);
+          const z = radius * Math.cos(phi);
+          starVertices.push(x, y, z);
+          const temp = Math.random();
+          const r = temp > 0.7 ? 1 : 0.8 + temp * 0.2;
+          const g = temp > 0.5 ? 0.9 + temp * 0.1 : 0.7 + temp * 0.3;
+          const b = temp < 0.3 ? 1 : 0.6 + temp * 0.4;
+          starColors.push(r, g, b);
+        }
+        starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+        starGeometry.setAttribute('color', new THREE.Float32BufferAttribute(starColors, 3));
+        const starMaterial = new THREE.PointsMaterial({
+          size: 2,
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.8
+        });
+        return new THREE.Points(starGeometry, starMaterial);
+      }
+      const starField = createStarField();
+      scene.add(starField);
+const sphericalComets = new SphericalCometManager(scene, SPHERICAL_COMET_CONFIG);
+      const blackHoleGeometry = new THREE.SphereGeometry(2, 64, 64);
+      const blackHolePhysicsMaterial = new THREE.MeshBasicMaterial({ 
+        color: 0x000000,
+        transparent: false,
+  depthTest: true,
+  depthWrite: true
+      });
+      const blackHole = new THREE.Mesh(blackHoleGeometry, blackHolePhysicsMaterial);
+      blackHole.renderOrder = 0;
+	  scene.add(blackHole);
+      const accretionRings = [];
+      function createAccretionDisk() {
+        const ringCount = 9;
+        for (let ring = 0; ring < ringCount; ring++) {
+          const innerRadius = 2.5 + ring * 0.4;
+          const outerRadius = innerRadius + 0.3;
+          const segments = 64;
+          const geometry = new THREE.RingGeometry(innerRadius, outerRadius, segments, 1);
+          const temperature = Math.pow(1 - (ring / ringCount), 0.8);
+          let color;
+          if (temperature > 0.9) {
+            color = new THREE.Color(1, 0.95, 0.8);
+          } else if (temperature > 0.7) {
+            color = new THREE.Color(1, 0.9, 0.3);
+          } else if (temperature > 0.4) {
+            color = new THREE.Color(1, 0.5, 0.1);
+          } else {
+            color = new THREE.Color(1, 0.2, 0.05);
+          }
+          const material = new THREE.MeshBasicMaterial({
+            color: color,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.3 + temperature * 0.5,
+            blending: THREE.AdditiveBlending
+          });
+          const ringMesh = new THREE.Mesh(geometry, material);
+          ringMesh.rotation.x = -Math.PI / 2;
+          ringMesh.rotation.z = (Math.random() - 0.5) * 0.1;
+          const orbitalSpeed = 0.03 / Math.sqrt(innerRadius / 2.5);
+          accretionRings.push({
+            mesh: ringMesh,
+            radius: innerRadius,
+            speed: orbitalSpeed,
+            baseSpeed: orbitalSpeed,
+            angle: Math.random() * Math.PI * 2,
+            wobble: (Math.random() - 0.5) * 0.02,
+            wobbleSpeed: 0.005 + Math.random() * 0.01
+          });
+          scene.add(ringMesh);
+        }
+      }
+      createAccretionDisk();
+      const meteorSystem = {
+        geometry: new THREE.BufferGeometry(),
+        material: new THREE.ShaderMaterial({
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          vertexColors: true,
+          vertexShader: `
+            attribute float size;
+            attribute float brightness;
+            attribute float trail;
+            varying vec3 vColor;
+            varying float vBrightness;
+            varying float vTrail;
+            void main() {
+              vColor = color;
+              vBrightness = brightness;
+              vTrail = trail;
+              vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+              gl_PointSize = size * (200.0 / -mvPosition.z);
+              gl_Position = projectionMatrix * mvPosition;
+            }
+          `,
+          fragmentShader: `
+            varying vec3 vColor;
+            varying float vBrightness;
+            varying float vTrail;
+            void main() {
+              vec2 center = gl_PointCoord - vec2(0.5);
+              float dist = length(center);
+              if (dist > 0.5) discard;
+              float core = 1.0 - smoothstep(0.0, 0.3, dist);
+              float glow = 1.0 - smoothstep(0.0, 0.5, dist);
+              float opacity = (core * 0.8 + glow * 0.2) * vBrightness;
+              opacity = smoothstep(0.0, 1.0, opacity);
+              float centerBoost = 1.0 - smoothstep(0.0, 0.15, dist);
+              vec3 finalColor = vColor * (1.0 + centerBoost * 0.5);
+              gl_FragColor = vec4(finalColor, opacity);
+            }
+          `
+        }),
+        data: []
+      };
+      function createMeteorParticles() {
+        const meteorCount = 11690;
+        const positions = [];
+        const colors = [];
+        const sizes = [];
+        const brightnesses = [];
+        const trails = [];
+        for (let i = 0; i < meteorCount; i++) {
+  const randomFactor = Math.pow(Math.random(), 0.25);
+  const radius = 2.5 + randomFactor * 25;
+  const angle = Math.random() * Math.PI * 2;
+  const height = (Math.random() - 0.5) * Math.max(0.08, radius * 0.04);
+  const x = radius * Math.cos(angle);
+  const y = height;
+  const z = radius * Math.sin(angle);
+  const temperature = Math.pow(2.5 / radius, 0.5);
+  const velocity = Math.sqrt(15 / radius);
+  let r, g, b;
+  if (temperature > 0.85) {
+    r = 1.0; g = 1.0; b = 0.0 + (temperature - 0.85) * 0.5;
+  } else if (temperature > 0.4) {
+    const t = (temperature - 0.5) / 0.35;
+    r = 1.0; g = 0.7 + t * 0.6; b = 0.0;
+  } else {
+    r = 1.0; g = temperature * 1.1; b = 0.0;
+  }
+  const baseSize = 0.3 + temperature * 0.8;
+  const size = baseSize * (0.8 + Math.random() * 0.4);
+  let brightness = 0.5 + temperature * 0.5 + Math.random() * 0.3;
+  const startFadeRadius = 22;
+  const maxRadius = 30;
+  if (radius > startFadeRadius) {
+    const fadeFactor = 1 - ((radius - startFadeRadius) / (maxRadius - startFadeRadius));
+    brightness *= Math.max(0.0, Math.min(1.0, fadeFactor));
+  }
+  if (brightness < 0.2) continue;
+  positions.push(x, y, z);
+  colors.push(r, g, b);
+  sizes.push(size);
+  brightnesses.push(brightness);
+  const trail = 0.3 + velocity * 0.2 + Math.random() * 0.4;
+  trails.push(trail);
+  meteorSystem.data.push({
+    radius,
+    angle,
+    height,
+    baseHeight: height,
+    orbitalSpeed: velocity / radius * 0.8,
+    baseOrbitalSpeed: velocity / radius * 0.8,
+    temperature,
+    turbulence: Math.random() * 0.02,
+    phase: Math.random() * Math.PI * 2,
+    wobbleSpeed: 0.008 + Math.random() * 0.025,
+    brightnessFactor: brightness,
+    trailLength: trail,
+    flickerSpeed: 1 + Math.random() * 3
+  });
+}
+        meteorSystem.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        meteorSystem.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        meteorSystem.geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+        meteorSystem.geometry.setAttribute('brightness', new THREE.Float32BufferAttribute(brightnesses, 1));
+        meteorSystem.geometry.setAttribute('trail', new THREE.Float32BufferAttribute(trails, 1));
+meteorSystem.material.transparent = true;
+meteorSystem.material.depthTest   = true;
+meteorSystem.material.depthWrite  = false;
+meteorSystem.material.blending    = THREE.AdditiveBlending;
+meteorSystem.material.alphaTest   = 0.15;
+meteorSystem.material.needsUpdate = true;
+        const meteors = new THREE.Points(meteorSystem.geometry, meteorSystem.material);
+        scene.add(meteors);
+        return meteors;
+      }
+      const realisticMeteors = createMeteorParticles();
+function createMiniMeteor(x, y, z) {
+  const miniMeteorGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+  const miniMeteorMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+  });
+  const miniMeteor = new THREE.Mesh(miniMeteorGeometry, miniMeteorMaterial);
+  miniMeteor.position.set(x, y, z);
+  scene.add(miniMeteor);
+  const trailSegments = 25;
+  const trailGeometry = new THREE.BufferGeometry();
+const positions = new Float32Array(trailSegments * 3);
+const colors    = new Float32Array(trailSegments * 3);
+trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+trailGeometry.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+trailGeometry.attributes.position.setUsage(THREE.DynamicDrawUsage);
+  for (let i = 0; i < trailSegments; i++) {
+    positions[i * 3] = x;
+    positions[i * 3 + 1] = y;
+    positions[i * 3 + 2] = z;
+    const fade = i / trailSegments;
+    colors[i * 3] = (1.0 - fade) * 1.0;
+    colors[i * 3 + 1] = (1.0 - fade) * 0.4;
+    colors[i * 3 + 2] = (1.0 - fade) * 0.1;
+  }
+  trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  trailGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const trailMaterial = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+    depthWrite: false,
+    linewidth: 2,
+  });
+  const trailMesh = new THREE.Line(trailGeometry, trailMaterial);
+  trailMesh.renderOrder = 999;
+  trailMesh.frustumCulled = false;
+  scene.add(trailMesh);
+  miniMeteors.push({
+    mesh: miniMeteor,
+    trailMesh,
+    trailGeometry,
+    positions,
+    colors,
+    life: 30.0,
+    position: new THREE.Vector3(x, y, z),
+    velocity: new THREE.Vector3(0, 0, 0),
+  });
+  miniMeteorCount++;
+}
+function updateMiniMeteors(deltaTime) {
+  for (let i = miniMeteors.length - 1; i >= 0; i--) {
+    const meteor = miniMeteors[i];
+    const { position, velocity, trailMesh, trailGeometry, positions, colors } = meteor;
+    const distanceToCenter = position.length();
+    if (distanceToCenter > 0.1) {
+      const gravityStrength = 10.0 / (distanceToCenter * distanceToCenter + 0.3);
+      const gravityDirection = position.clone().normalize().multiplyScalar(-1);
+      velocity.add(gravityDirection.multiplyScalar(gravityStrength * deltaTime));
+    }
+    if (velocity.length() < 2.0) {
+      const initialBoost = position.clone().normalize().multiplyScalar(-2.0);
+      velocity.add(initialBoost.multiplyScalar(deltaTime * 0.5));
+    }
+    position.add(velocity.clone().multiplyScalar(deltaTime));
+    meteor.mesh.position.copy(position);
+    const trailSegments = positions.length / 3;
+    const positionAttribute = trailGeometry.attributes.position;
+    for (let j = trailSegments - 1; j > 0; j--) {
+        positionAttribute.setX(j, positionAttribute.getX(j-1));
+        positionAttribute.setY(j, positionAttribute.getY(j-1));
+        positionAttribute.setZ(j, positionAttribute.getZ(j-1));
+    }
+    positionAttribute.setX(0, position.x);
+    positionAttribute.setY(0, position.y);
+    positionAttribute.setZ(0, position.z);
+    positionAttribute.needsUpdate = true;
+	trailGeometry.computeBoundingSphere();
+    const opacity = 0.6 + Math.min(velocity.length() / 10, 0.4);
+    trailMesh.material.opacity = opacity;
+    meteor.life -= deltaTime * 15;
+    if (distanceToCenter < 1) {
+      scene.remove(meteor.mesh);
+      scene.remove(meteor.trailMesh);
+      miniMeteors.splice(i, 1);
+      miniMeteorCount--;
+    }
+  }
+}
+      function createRelativisticJets() {
+        const jets = [];
+        for (let j = 0; j < 2; j++) {
+          const jetGeometry = new THREE.ConeGeometry(0.3, 25, 8);
+          const jetMaterial = new THREE.MeshBasicMaterial({
+            color: j === 0 ? 0x00aaff : 0x0088cc,
+            transparent: true,
+            opacity: 0.1,
+            blending: THREE.AdditiveBlending
+          });
+          const jet = new THREE.Mesh(jetGeometry, jetMaterial);
+          jet.position.y = j === 0 ? 12.5 : -12.5;
+          if (j === 1) jet.rotation.x = Math.PI;
+          scene.add(jet);
+          jets.push(jet);
+        }
+        return jets;
+      }
+      const jets = createRelativisticJets();
+      let isMouseDown = false;
+      let isRightMouseDown = false;
+      let lastMouseX = 0;
+      let lastMouseY = 0;
+      let lastClickTime = 0;
+      document.addEventListener('mousedown', (event) => {
+        if (event.button === 0) {
+          isMouseDown = true;
+        } else if (event.button === 2) {
+          event.preventDefault();
+          isRightMouseDown = true;
+          isGravityAltered = true;
+          gravityMultiplier = 3.0;
+          document.getElementById('gravity-status').textContent = '2,5x';
+        }
+        lastMouseX = event.clientX;
+        lastMouseY = event.clientY;
+      });
+      document.addEventListener('mouseup', (event) => {
+        if (event.button === 0) {
+          isMouseDown = false;
+        } else if (event.button === 2) {
+          isRightMouseDown = false;
+          isGravityAltered = false;
+          gravityMultiplier = 1.0;
+          document.getElementById('gravity-status').textContent = '1x';
+        }
+      });
+      document.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+      });
+      document.addEventListener('dblclick', (event) => {
+        const mouse = new THREE.Vector2();
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, camera);
+        const direction = raycaster.ray.direction.clone();
+        const startPosition = camera.position.clone().add(direction.multiplyScalar(5));
+        createMiniMeteor(startPosition.x, startPosition.y, startPosition.z);
+      });
+      document.addEventListener('mousemove', (event) => {
+        updateBookInteraction(event);
+        if (isMouseDown && !isRightMouseDown) {
+          const deltaX = event.clientX - lastMouseX;
+          const deltaY = event.clientY - lastMouseY;
+          controls.camera.targetTheta -= deltaX * 0.005 * controls.sensitivity;
+          controls.camera.targetPhi = Math.max(0.1, Math.min(Math.PI - 0.1, 
+            controls.camera.targetPhi + deltaY * 0.005 * controls.sensitivity));
+          lastMouseX = event.clientX;
+          lastMouseY = event.clientY;
+        }
+      });
+      document.addEventListener('click', (event) => {
+	   if (coversMuted) return;
+        handleBookClick(event);
+      });
+      document.addEventListener('wheel', (event) => {
+
+        const zoomDelta = event.deltaY > 0 ? 1.1 : 0.9;
+        controls.camera.targetDistance = Math.max(controls.minDistance, 
+          Math.min(controls.maxDistance, controls.camera.targetDistance * zoomDelta));
+      });
+      document.getElementById('reset').addEventListener('click', (e) => {
+        e.preventDefault();
+        controls.camera.targetDistance = 12;
+        controls.camera.targetPhi = Math.PI * 0.3;
+        controls.camera.targetTheta = 0;
+      });
+      document.getElementById('toggle-warp').addEventListener('click', (e) => {
+        e.preventDefault();
+        controls.warpSpace = !controls.warpSpace;
+        blackHoleMaterial.uniforms.uWarpSpace.value = controls.warpSpace;
+      });
+      createBookCovers();
+	startExplosionScheduler();
+      let time = 0;
+      let frameCount = 0;
+      let lastTime = Date.now();
+  function updateCamera() {
+  if (warp && warp.active) return;
+  controls.camera.distance += (controls.camera.targetDistance - controls.camera.distance) * controls.damping;
+  controls.camera.phi      += (controls.camera.targetPhi      - controls.camera.phi)      * controls.damping;
+  controls.camera.theta    += (controls.camera.targetTheta    - controls.camera.theta)    * controls.damping;
+  const off = new THREE.Vector3(
+    controls.camera.distance * Math.sin(controls.camera.phi) * Math.cos(controls.camera.theta),
+    controls.camera.distance * Math.cos(controls.camera.phi),
+    controls.camera.distance * Math.sin(controls.camera.phi) * Math.sin(controls.camera.theta)
+  );
+  if (selectedBook && selectedBook.sprite) {
+    const bookPos = selectedBook.sprite.position;
+    camera.position.copy(bookPos).add(off);
+    camera.lookAt(bookPos);
+  } else {
+    camera.position.copy(off);
+    camera.lookAt(0, 0, 0);
+  }
+  virtualCamera.copy(camera.position);
+}
+      function animate() {
+        const currentTime = Date.now();
+        const deltaTime = (currentTime - lastTime) / 1000;
+        lastTime = currentTime;
+        time += deltaTime;
+        frameCount++;
+sphericalComets.update(deltaTime);
+        updateCamera();
+		if (Array.isArray(jets)) {
+  const ax = Math.sin(time * 0.4) * 0.03;
+  const az = Math.cos(time * 0.4) * 0.03;
+  jets.forEach((jet) => {
+    if (!jet || !jet.geometry) return;
+    if (!jet.userData.baseQuat) {
+      jet.userData.baseQuat = jet.quaternion.clone();
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(jet.userData.baseQuat);
+      jet.userData.sign = (up.y >= 0 ? 1 : -1);
+      let H = jet.geometry.parameters?.height;
+      if (H == null) {
+        jet.geometry.computeBoundingBox();
+        H = jet.geometry.boundingBox.max.y - jet.geometry.boundingBox.min.y;
+      }
+      jet.userData.H = H || 25;
+    }
+    const sign = jet.userData.sign;
+    const H = jet.userData.H;
+    const qDelta = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(0, 0, sign * az, 'XYZ')
+    );
+    jet.quaternion.copy(jet.userData.baseQuat).multiply(qDelta);
+    const baseLocal = new THREE.Vector3(0, -H * 0.5, 0).applyQuaternion(jet.quaternion);
+    jet.position.copy(baseLocal).multiplyScalar(-1);
+  });
+}
+	if (isOrbitMoving()) _lastOrbitActiveAt = performance.now();
+const HOVER_ZOOM_MIN = 2.0;
+const HOVER_ZOOM_MAX = 20.0;
+const HOVER_ZOOM_K   = 0.5; 
+        blackHoleMaterial.uniforms.uTime.value = time;
+        blackHoleMaterial.uniforms.uCameraPosition.value.copy(virtualCamera);
+const f = new THREE.Vector3();
+const r = new THREE.Vector3();
+const u = new THREE.Vector3();
+camera.getWorldDirection(f);
+r.set(1,0,0).applyQuaternion(camera.quaternion);
+u.set(0,1,0).applyQuaternion(camera.quaternion);
+blackHoleMaterial.uniforms.uCamForward.value.copy(f);
+blackHoleMaterial.uniforms.uCamRight.value.copy(r);
+blackHoleMaterial.uniforms.uCamUp.value.copy(u);
+const bhNdc = new THREE.Vector3(0,0,0).project(camera);
+blackHoleMaterial.uniforms.uBHScreen.value.set(bhNdc.x, bhNdc.y);
+        updateMiniMeteors(deltaTime);
+        bookSystem.books.forEach((book) => {
+		if (coversMuted) {
+  const mat = book.sprite.material;
+  mat.transparent = true;
+  mat.opacity = 0.0
+  mat.depthTest = true;
+  mat.depthWrite = false;
+  book.sprite.renderOrder = 1500;
+  book.sprite.scale.x += (book.originalScale.x - book.sprite.scale.x) * 0.2;
+  book.sprite.scale.y += (book.originalScale.y - book.sprite.scale.y) * 0.2;
+  return;
+}
+          let speedMultiplier = 1.0;
+          if (book.radius < 8.0) {
+            speedMultiplier = 2.0 + (8.0 - book.radius) * 0.3;
+          }
+          if (isGravityAltered) {
+            speedMultiplier *= gravityMultiplier;
+          }
+          book.angle += book.orbitalSpeed * speedMultiplier * deltaTime;
+          const turbulence = Math.sin(time * book.wobbleSpeed + book.phase) * 0.01;
+          const currentHeight = book.baseHeight + turbulence;
+          const x = book.radius * Math.cos(book.angle);
+          const y = currentHeight;
+          const z = book.radius * Math.sin(book.angle);
+          book.sprite.position.set(x, y, z);
+if (book.isHovered && selectedBook !== book) {
+  const dist = camera.position.distanceTo(book.sprite.position);
+  const factor = Math.min(HOVER_ZOOM_MAX, HOVER_ZOOM_MIN + dist * HOVER_ZOOM_K);
+  const targetScaleX = book.originalScale.x * factor;
+  const targetScaleY = book.originalScale.y * factor;
+  book.sprite.scale.x += (targetScaleX - book.sprite.scale.x) * 0.06;
+  book.sprite.scale.y += (targetScaleY - book.sprite.scale.y) * 0.06;
+  book.sprite.material.opacity = 0.9;
+  book.sprite.renderOrder = 9999;
+  book.sprite.material.depthTest = true;
+} else {
+  book.sprite.scale.x += (book.originalScale.x - book.sprite.scale.x) * 0.02;
+  book.sprite.scale.y += (book.originalScale.y - book.sprite.scale.y) * 0.02;
+  book.sprite.material.opacity = 0.85;
+  book.sprite.renderOrder = 1000;
+  book.sprite.material.depthTest = true;
+}
+  book.sprite.lookAt(camera.position);
+});
+        accretionRings.forEach((ring, index) => {
+          let speedMultiplier = 1.0;
+          if (ring.radius < 5.0) {
+            speedMultiplier = 2.0 + (5.0 - ring.radius) * 0.5;
+          }
+          if (isGravityAltered) {
+            speedMultiplier *= gravityMultiplier;
+          }
+          ring.angle += ring.baseSpeed * speedMultiplier * deltaTime;
+          ring.mesh.rotation.y = ring.angle;
+          const wobble = Math.sin(time * ring.wobbleSpeed + index) * ring.wobble;
+          ring.mesh.rotation.x = -Math.PI / 2 + wobble;
+          const baseOpacity = 0.3 + (1 - index / accretionRings.length) * 0.5;
+          let opacity = baseOpacity + Math.sin(time * 0.5 + index) * 0.1;
+          if (isGravityAltered && ring.radius < 8.0) {
+            opacity *= 0.5;
+            const pulsation = Math.sin(time * 8 + index * 0.5) * 0.3;
+            opacity += pulsation;
+          }
+          ring.mesh.material.opacity = Math.max(0.1, Math.min(1.0, opacity));
+        });
+        const positions = realisticMeteors.geometry.attributes.position.array;
+        const brightnesses = realisticMeteors.geometry.attributes.brightness.array;
+        const trails = realisticMeteors.geometry.attributes.trail.array;
+        for (let i = 0; i < meteorSystem.data.length; i++) {
+          const meteor = meteorSystem.data[i];
+          const i3 = i * 3;
+          let speedMultiplier = 1.0;
+          if (meteor.radius < 8.0) {
+            speedMultiplier = 3.0 + (8.0 - meteor.radius) * 1.5;
+          } else if (meteor.radius < 12.0) {
+            speedMultiplier = 1.5;
+          }
+          if (isGravityAltered) {
+            speedMultiplier *= gravityMultiplier;
+          }
+          meteor.angle += meteor.baseOrbitalSpeed * speedMultiplier * deltaTime;
+          const turbulence = Math.sin(time * meteor.wobbleSpeed + meteor.phase) * meteor.turbulence;
+          const currentHeight = meteor.baseHeight + turbulence;
+          let radiusModifier = 1;
+          if (controls.warpSpace && meteor.radius < 6) {
+            const gravityEffect = 1 / (meteor.radius * meteor.radius + 0.8);
+            radiusModifier += Math.sin(time * 2.5 + meteor.phase) * gravityEffect * 0.08;
+          }
+          if (isGravityAltered && meteor.radius < 10.0) {
+            const alterationEffect = 1 / (meteor.radius + 1.0);
+            radiusModifier += Math.sin(time * 5 + meteor.phase) * alterationEffect * 0.15;
+          }
+            const currentRadius = meteor.radius * radiusModifier;
+          let x = currentRadius * Math.cos(meteor.angle);
+          let y = currentHeight;
+          let z = currentRadius * Math.sin(meteor.angle);
+          const currentPos = new THREE.Vector3(x, y, z);
+          const totalForce = new THREE.Vector3();
+          for (const miniMeteor of miniMeteors) {
+            const miniMeteorPos = miniMeteor.position;
+            const direction = new THREE.Vector3().subVectors(miniMeteorPos, currentPos);
+            const distance = direction.length();
+            const attractionDistance = 2.0;
+            const minDistance = 0.2;
+            const strength = 0.0018;
+            if (distance < attractionDistance && distance > minDistance) {
+              const forceMagnitude = strength / (distance * distance);
+              totalForce.add(direction.normalize().multiplyScalar(forceMagnitude));
+            }
+          }
+          if (totalForce.length() > 0) {
+            const planarForce = new THREE.Vector3(totalForce.x, 0, totalForce.z);
+            const radialDirection = new THREE.Vector3(x, 0, z).normalize();
+            const tangentialDirection = new THREE.Vector3(-z, 0, x).normalize();
+            const radialStrength = planarForce.dot(radialDirection);
+            const tangentialStrength = planarForce.dot(tangentialDirection);
+            meteor.radius -= radialStrength * 50 * deltaTime; 
+            meteor.angle -= tangentialStrength * 50 * deltaTime;
+          }
+          meteor.radius = Math.max(meteor.radius, 5);
+          x = meteor.radius * Math.cos(meteor.angle);
+          y = currentHeight;
+          z = meteor.radius * Math.sin(meteor.angle);
+          positions[i3] = x;
+          positions[i3 + 1] = y;
+          positions[i3 + 2] = z;
+          const flickering = Math.sin(time * meteor.flickerSpeed + meteor.phase * 2) * 0.3;
+          let brightnessVariation = 1 + Math.sin(time * 1.8 + meteor.phase) * 0.4 + flickering;
+          if (isGravityAltered && meteor.radius < 8.0) {
+            brightnessVariation *= 1.9;
+          }
+          brightnesses[i] = meteor.brightnessFactor * brightnessVariation;
+          const velocityFactor = meteor.baseOrbitalSpeed * speedMultiplier * 50;
+          const trailVariation = 1 + Math.sin(time * 0.5 + meteor.phase) * 0.3;
+          trails[i] = meteor.trailLength * velocityFactor * trailVariation;
+        }
+        realisticMeteors.geometry.attributes.position.needsUpdate = true;
+        realisticMeteors.geometry.attributes.brightness.needsUpdate = true;
+        realisticMeteors.geometry.attributes.trail.needsUpdate = true;
+        const armPositions = galacticArmSystem.geometry.attributes.position.array;
+        const armData = galacticArmSystem.data;
+        const rotationSpeed = 0.05;
+        galacticArmSystem.rotationAngle = (galacticArmSystem.rotationAngle || 0) + rotationSpeed * deltaTime;
+        for (let i = 0; i < armData.length; i++) {
+          const particle = armData[i];
+          const i3 = i * 3;
+          const currentAngle = particle.baseAngle + galacticArmSystem.rotationAngle;
+          const armWidth = 2 + Math.sin(time * 0.5 + particle.randomPhase) * 1.5;
+          const randomOffset = Math.sin(time * 0.3 + particle.randomPhase * 2) * armWidth * 0.5;
+          const perpAngle = currentAngle + Math.PI / 2;
+          armPositions[i3] = particle.baseRadius * Math.cos(currentAngle) + randomOffset * Math.cos(perpAngle);
+          armPositions[i3 + 2] = particle.baseRadius * Math.sin(currentAngle) + randomOffset * Math.sin(perpAngle);
+        }
+        galacticArmSystem.geometry.attributes.position.needsUpdate = true;
+        starField.rotation.y += 0.00005;
+        jets.forEach((jet, index) => {
+          let intensity = 0.4 + Math.sin(time * 2 + index * Math.PI) * 0.2;
+          if (isGravityAltered) {
+            intensity *= 1.5;
+            intensity += Math.sin(time * 8) * 0.3;
+          }
+          jet.material.opacity = Math.min(1.0, intensity);
+          jet.scale.y = 0.9 + intensity * 0.2;
+        });
+updateRelativisticApproach(deltaTime);
+explosionManager.update(deltaTime);
+        renderer.clear();
+        if (currentMode === renderModes.SHADER_ONLY) {
+          blackHoleMaterial.uniforms.uMixFactor.value = 1.0;
+          renderer.render(shaderScene, shaderCamera);
+        } else if (currentMode === renderModes.PHYSICS_ONLY) {
+          renderer.render(scene, camera);
+        } else {
+          blackHoleMaterial.uniforms.uMixFactor.value = 0.4;
+          renderer.render(scene, camera);
+          renderer.render(shaderScene, shaderCamera);
+        }
+        if (frameCount % 60 === 0) {
+          document.getElementById('distance').textContent = controls.camera.distance.toFixed(1);
+          document.getElementById('mini-meteors').textContent = miniMeteorCount;
+          document.getElementById('fps').textContent = Math.round(1 / deltaTime);
+        }
+        requestAnimationFrame(animate);
+      }
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        blackHoleMaterial.uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+      });
+	    document.getElementById('toggle-debug').addEventListener('click', (e) => {
+    e.preventDefault();
+    const debugPanel = document.getElementById('debug');
+    if (debugPanel.style.display === 'none') {
+      debugPanel.style.display = 'block';
+    } else {
+      debugPanel.style.display = 'none';
+    }
+  });
+      animate();
+    </script>
+  </body>
+</html>
