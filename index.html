@@ -1610,7 +1610,7 @@ function createMiniMeteor(x, y, z) {
   const miniMeteor = new THREE.Mesh(miniMeteorGeometry, miniMeteorMaterial);
   miniMeteor.position.set(x, y, z);
   scene.add(miniMeteor);
-  const trailSegments = 25;
+  const trailSegments = 30;
   const trailGeometry = new THREE.BufferGeometry();
 const positions = new Float32Array(trailSegments * 3);
 const colors    = new Float32Array(trailSegments * 3);
