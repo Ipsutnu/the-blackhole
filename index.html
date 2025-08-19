@@ -155,7 +155,26 @@ canvas, body { touch-action: none; -webkit-user-select: none; user-select: none;
 const canvas = renderer.domElement;
 const PI = Math.PI;
 const EPS = 0.001;
-
+//----------------------------
+const BH_CENTER = new THREE.Vector3(0, 0, 0);
+let   BH_RADIUS = 2.0;
+const bhMesh = scene.getObjectByName?.('eventHorizon');
+if (bhMesh && bhMesh.geometry) {
+  bhMesh.geometry.computeBoundingSphere?.();
+  const r = (bhMesh.geometry.boundingSphere?.radius || 1) * (bhMesh.scale?.x || 1);
+  if (r) BH_RADIUS = r;
+}
+const _ray = new THREE.Raycaster();
+function clickHitsBH(event) {
+  const canvas = renderer.domElement;
+  const rect = canvas.getBoundingClientRect();
+  const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  _ray.setFromCamera({ x: ndcX, y: ndcY }, camera);
+  const dist2 = _ray.ray.distanceSqToPoint(BH_CENTER);
+  return dist2 <= (BH_RADIUS * BH_RADIUS);
+}
+//-----------------------------
 let coversMuted = false;
  const isPhoneLike = /Android.+Mobile|iPhone|iPod/i.test(navigator.userAgent || "");
   document.addEventListener('DOMContentLoaded', () => {
@@ -1948,10 +1967,17 @@ function updateMiniMeteors(deltaTime) {
           lastMouseY = event.clientY;
         }
       });
+      //-----------------------------------------------
       document.addEventListener('click', (event) => {
-	   if (coversMuted) return;
-        handleBookClick(event);
-      });
+  if (isPhoneLike && selectedBook && clickHitsBH(event)) {
+    startWarpToBlackHole();
+    event.preventDefault();
+    return;
+  }
+  if (coversMuted) return;
+  handleBookClick(event);
+});
+	  //---------------------------------------
       document.addEventListener('wheel', (event) => {
 
         const zoomDelta = event.deltaY > 0 ? 1.1 : 0.9;
