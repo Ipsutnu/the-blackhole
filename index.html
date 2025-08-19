@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="mobile-web-app-capable" content="yes">
     <title>The Blackhole</title>
 	<link rel="icon" href="icon.png" type="image/png">
     <style>
@@ -18,6 +19,13 @@ canvas, body { touch-action: none; -webkit-user-select: none; user-select: none;
         overflow: hidden;
         font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
       }
+	  html, body, canvas {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+canvas, a, button { -webkit-tap-highlight-color: transparent; }
+a:focus { outline: none; }
        #hint {
         position: fixed;
         left: 50%;
@@ -114,6 +122,15 @@ canvas, body { touch-action: none; -webkit-user-select: none; user-select: none;
         border-color: rgba(0,150,255,0.5);
       }
       canvas { display: block; }
+	  @media (pointer: coarse) and (hover: none) {
+  * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none !important;   /* bloqueia menu de toque */
+    -webkit-tap-highlight-color: transparent; /* some com o highlight azul */
+  }
+}
+	  
     </style>
   </head>
   <body>
@@ -155,26 +172,45 @@ canvas, body { touch-action: none; -webkit-user-select: none; user-select: none;
 const canvas = renderer.domElement;
 const PI = Math.PI;
 const EPS = 0.001;
-//----------------------------
-const BH_CENTER = new THREE.Vector3(0, 0, 0);
-let   BH_RADIUS = 2.0;
-const bhMesh = scene.getObjectByName?.('eventHorizon');
-if (bhMesh && bhMesh.geometry) {
-  bhMesh.geometry.computeBoundingSphere?.();
-  const r = (bhMesh.geometry.boundingSphere?.radius || 1) * (bhMesh.scale?.x || 1);
-  if (r) BH_RADIUS = r;
+let tapDownX = 0, tapDownY = 0, tapDownT = 0;
+let isDraggingOrbit = false;
+const CLICK_TOL  = 12; 
+const CLICK_TIME = 250;
+let ignoreNextClick = false;
+function openSelectedBookIfTap() {
+  if (selectedBook && selectedBook.pdf) {
+    window.open(selectedBook.pdf, '_blank', 'noopener,noreferrer');
+  }
 }
-const _ray = new THREE.Raycaster();
-function clickHitsBH(event) {
-  const canvas = renderer.domElement;
-  const rect = canvas.getBoundingClientRect();
-  const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-  _ray.setFromCamera({ x: ndcX, y: ndcY }, camera);
-  const dist2 = _ray.ray.distanceSqToPoint(BH_CENTER);
-  return dist2 <= (BH_RADIUS * BH_RADIUS);
+const NDC_HOVER_TOL = 0.12;
+const _hoverV = new THREE.Vector3();
+let lastTouchPos = { x: 0, y: 0, active: false };
+function setHoveredBookMobile(book) {
+  const books = (bookSystem && Array.isArray(bookSystem.books)) ? bookSystem.books : [];
+  for (const b of books) if (b) b.isHovered = (b === book);
+  bookSystem.hoveredBook = book || null;
 }
-//-----------------------------
+function updateMobileHoverAt(clientX, clientY) {
+  if (!bookSystem || !Array.isArray(bookSystem.books)) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+  const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+  let best = null, bestD2 = Infinity;
+  for (const b of bookSystem.books) {
+    if (!b?.sprite || !b.sprite.visible) continue;
+    (b.sprite.getWorldPosition ? b.sprite.getWorldPosition(_hoverV) : _hoverV.copy(b.sprite.position));
+    _hoverV.project(camera);
+    const dx = _hoverV.x - ndcX;
+    const dy = _hoverV.y - ndcY;
+    const d2 = dx*dx + dy*dy;
+    if (d2 < bestD2) { bestD2 = d2; best = b; }
+  }
+  if (best && bestD2 <= (NDC_HOVER_TOL * NDC_HOVER_TOL)) {
+    setHoveredBookMobile(best);
+  } else {
+    setHoveredBookMobile(null);
+  }
+}
 let coversMuted = false;
  const isPhoneLike = /Android.+Mobile|iPhone|iPod/i.test(navigator.userAgent || "");
   document.addEventListener('DOMContentLoaded', () => {
@@ -216,9 +252,31 @@ function touchDistance(t0, t1) {
   const dy = t1.clientY - t0.clientY;
   return Math.hypot(dx, dy);
 }
+const BH_CENTER = new THREE.Vector3(0, 0, 0);
+let   BH_RADIUS = 2.0;
+const bhMesh = scene.getObjectByName?.('eventHorizon');
+if (bhMesh && bhMesh.geometry) {
+  bhMesh.geometry.computeBoundingSphere?.();
+  const r = (bhMesh.geometry.boundingSphere?.radius || 1) * (bhMesh.scale?.x || 1);
+  if (r) BH_RADIUS = r;
+}
+const _ray = new THREE.Raycaster();
+function clickHitsBH(event) {
+  const canvas = renderer.domElement;
+  const rect = canvas.getBoundingClientRect();
+  const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  _ray.setFromCamera({ x: ndcX, y: ndcY }, camera);
+  const dist2 = _ray.ray.distanceSqToPoint(BH_CENTER);
+  return dist2 <= (BH_RADIUS * BH_RADIUS);
+}
 canvas.addEventListener('touchstart', (e) => {
   if (e.touches.length === 1) {
-    const t = e.touches[0];
+   const t = e.touches[0];
+tapDownX = t.clientX;
+tapDownY = t.clientY;
+tapDownT = performance.now();
+isDraggingOrbit = false;
     touchState.mode = 'orbit';
     touchState.startX = t.clientX;
     touchState.startY = t.clientY;
@@ -238,6 +296,21 @@ canvas.addEventListener('touchstart', (e) => {
 canvas.addEventListener('touchmove', (e) => {
   if (e.touches.length === 1 && touchState.mode === 'orbit') {
     const t = e.touches[0];
+if (!isDraggingOrbit) {
+  const dx = Math.abs(t.clientX - tapDownX);
+  const dy = Math.abs(t.clientY - tapDownY);
+  const holdMs = performance.now() - tapDownT;
+if (selectedBook && holdMs > 350) {
+  lastTouchPos.x = t.clientX;
+  lastTouchPos.y = t.clientY;
+  lastTouchPos.active = true;
+  isDraggingOrbit = false;
+  return;
+}
+  if ((dx + dy) > CLICK_TOL) {
+    isDraggingOrbit = true;
+  }
+}
     const dx = (t.clientX - touchState.startX) / canvas.clientWidth;
     const dy = (t.clientY - touchState.startY) / canvas.clientHeight;
     const targetTheta = touchState.startTheta - dx * ROT_SENS;
@@ -245,6 +318,10 @@ canvas.addEventListener('touchmove', (e) => {
     targetPhi = Math.max(MIN_PHI, Math.min(MAX_PHI, targetPhi));
     controls.camera.targetTheta = targetTheta;
     controls.camera.targetPhi   = targetPhi;
+	  lastTouchPos.x = t.clientX;
+  lastTouchPos.y = t.clientY;
+  lastTouchPos.active = true;
+
   } else if (e.touches.length === 2) {
     const [t0, t1] = e.touches;
     const curD = touchDistance(t0, t1);
@@ -257,12 +334,14 @@ canvas.addEventListener('touchmove', (e) => {
     target = Math.max(minD, Math.min(maxD, target));
     controls.camera.targetDistance = target;
   } else if (e.touches.length >= 3 && touchState.threeTap.active) {
-    touchState.threeTap.moved = true;
+    touchState.threeTap.moved = false;
   }
 }, { passive:false });
 canvas.addEventListener('touchend', (e) => {
-  // Toggle PNGs: só se foi um TAP de 3 dedos (<=300ms e sem arrastar)
-  if (touchState.threeTap.active && e.touches.length === 0) {
+ if (e.touches.length === 0) {
+    lastTouchPos.active = false;
+    touchState.mode = null;
+  } else if (e.touches.length === 1) {
     const dt = performance.now() - touchState.threeTap.t0;
     if (dt < 300 && !touchState.threeTap.moved) {
       coversMuted = !coversMuted;
@@ -274,8 +353,6 @@ canvas.addEventListener('touchend', (e) => {
     }
     touchState.threeTap.active = false;
   }
-
-  // Atualiza modo de gesto
   if (e.touches.length === 0) {
     touchState.mode = null;
   } else if (e.touches.length === 1) {
@@ -287,8 +364,6 @@ canvas.addEventListener('touchend', (e) => {
     touchState.startTheta = controls.camera.targetTheta ?? controls.camera.theta ?? 0;
   }
 }, { passive:false });
-
-// (mantém)
 document.addEventListener('dblclick', e => e.preventDefault(), { passive:false });
 function setCoversMuted(on) {
   coversMuted = on;
@@ -755,7 +830,7 @@ if (warp.active && warp.phase === 'preBack') {
     if (selectedBook && selectedBook.sprite) {
       const bookPos = selectedBook.sprite.position.clone();
       const dirDyn = bookPos.clone().sub(camera.position).normalize();
-      const stopDist = 1.2;
+      const stopDist = 1.5;
       warp.target.copy(bookPos).addScaledVector(dirDyn, -stopDist);
       warp.look.copy(bookPos);
     }
@@ -1967,7 +2042,6 @@ function updateMiniMeteors(deltaTime) {
           lastMouseY = event.clientY;
         }
       });
-      //-----------------------------------------------
       document.addEventListener('click', (event) => {
   if (isPhoneLike && selectedBook && clickHitsBH(event)) {
     startWarpToBlackHole();
@@ -1977,7 +2051,6 @@ function updateMiniMeteors(deltaTime) {
   if (coversMuted) return;
   handleBookClick(event);
 });
-	  //---------------------------------------
       document.addEventListener('wheel', (event) => {
 
         const zoomDelta = event.deltaY > 0 ? 1.1 : 0.9;
@@ -2028,6 +2101,16 @@ function updateMiniMeteors(deltaTime) {
         frameCount++;
 sphericalComets.update(deltaTime);
         updateCamera();
+		if (lastTouchPos.active) {
+  if (selectedBook && isDraggingOrbit) {
+    setHoveredBookMobile(null);
+  } else {
+    updateMobileHoverAt(lastTouchPos.x, lastTouchPos.y);
+  }
+}
+if (isMouseDown && !isRightMouseDown) {
+  setHoveredBookMobile(null);
+}
 		if (Array.isArray(jets)) {
   const ax = Math.sin(time * 0.4) * 0.03;
   const az = Math.cos(time * 0.4) * 0.03;
@@ -2057,7 +2140,7 @@ sphericalComets.update(deltaTime);
 	if (isOrbitMoving()) _lastOrbitActiveAt = performance.now();
 const HOVER_ZOOM_MIN = 2.0;
 const HOVER_ZOOM_MAX = 20.0;
-const HOVER_ZOOM_K   = 0.5; 
+const HOVER_ZOOM_K   = 0.3; 
         blackHoleMaterial.uniforms.uTime.value = time;
         blackHoleMaterial.uniforms.uCameraPosition.value.copy(virtualCamera);
 const f = new THREE.Vector3();
@@ -2086,7 +2169,7 @@ blackHoleMaterial.uniforms.uBHScreen.value.set(bhNdc.x, bhNdc.y);
 }
           let speedMultiplier = 1.0;
           if (book.radius < 8.0) {
-            speedMultiplier = 2.0 + (8.0 - book.radius) * 0.3;
+            speedMultiplier = 2.3 + (8.0 - book.radius) * 0.3;
           }
           if (isGravityAltered) {
             speedMultiplier *= gravityMultiplier;
