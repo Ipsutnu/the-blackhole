@@ -156,13 +156,7 @@ const canvas = renderer.domElement;
 const PI = Math.PI;
 const EPS = 0.001;
 
-let coversMuted = (typeof window.coversMuted === 'boolean') ? window.coversMuted : false;
-function applyCoversMuted(flag) {
-  coversMuted = flag;
-  if (window.bookSystem && Array.isArray(bookSystem.books)) {
-    bookSystem.books.forEach(b => { if (b.sprite) b.sprite.visible = !flag; });
-  }
-}
+let coversMuted = false;
  const isPhoneLike = /Android.+Mobile|iPhone|iPod/i.test(navigator.userAgent || "");
   document.addEventListener('DOMContentLoaded', () => {
     if (isPhoneLike) {
@@ -248,10 +242,12 @@ canvas.addEventListener('touchmove', (e) => {
   }
 }, { passive:false });
 canvas.addEventListener('touchend', (e) => {
-  if (touchState.threeTap.active && e.touches.length === 0) {
-    const dt = performance.now() - touchState.threeTap.t0;
-    if (dt < 300 && !touchState.threeTap.moved) {
-      applyCoversMuted(!coversMuted);
+  coversMuted = !coversMuted;
+if (window.bookSystem && Array.isArray(bookSystem.books)) {
+  for (const b of bookSystem.books) {
+    if (b.sprite) b.sprite.visible = !coversMuted;
+  }
+}
     }
     touchState.threeTap.active = false;
   }
@@ -268,7 +264,6 @@ canvas.addEventListener('touchend', (e) => {
 }, { passive:false });
 document.addEventListener('dblclick', e => e.preventDefault(), { passive:false });
 		
-let coversMuted = false;
 function setCoversMuted(on) {
   coversMuted = on;
   const a = document.getElementById('toggle-covers');
