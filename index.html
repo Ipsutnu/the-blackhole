@@ -242,14 +242,21 @@ canvas.addEventListener('touchmove', (e) => {
   }
 }, { passive:false });
 canvas.addEventListener('touchend', (e) => {
-  coversMuted = !coversMuted;
-if (window.bookSystem && Array.isArray(bookSystem.books)) {
-  for (const b of bookSystem.books) {
-    if (b.sprite) b.sprite.visible = !coversMuted;
-  }
-}
+  // Toggle PNGs: só se foi um TAP de 3 dedos (<=300ms e sem arrastar)
+  if (touchState.threeTap.active && e.touches.length === 0) {
+    const dt = performance.now() - touchState.threeTap.t0;
+    if (dt < 300 && !touchState.threeTap.moved) {
+      coversMuted = !coversMuted;
+      if (window.bookSystem && Array.isArray(bookSystem.books)) {
+        for (const b of bookSystem.books) {
+          if (b.sprite) b.sprite.visible = !coversMuted;
+        }
+      }
+    }
     touchState.threeTap.active = false;
   }
+
+  // Atualiza modo de gesto
   if (e.touches.length === 0) {
     touchState.mode = null;
   } else if (e.touches.length === 1) {
@@ -261,8 +268,9 @@ if (window.bookSystem && Array.isArray(bookSystem.books)) {
     touchState.startTheta = controls.camera.targetTheta ?? controls.camera.theta ?? 0;
   }
 }, { passive:false });
+
+// (mantém)
 document.addEventListener('dblclick', e => e.preventDefault(), { passive:false });
-		
 function setCoversMuted(on) {
   coversMuted = on;
   const a = document.getElementById('toggle-covers');
