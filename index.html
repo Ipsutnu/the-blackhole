@@ -121,10 +121,8 @@
     <div id="hint"> Duplo clique: Mini meteoros • <a href="#" id="reset">Resetar Câmera</a> • <a href="#" id="toggle-debug">Debug Mode</a> • <a href="#" id="toggle-warp"></a> <a href="#" id="toggle-covers">Desabilitar Livros</a> • Botão direito: Acelerar gravidade</div>
     <div id="debug">
       Distância: <span id="distance">0</span> UA<br>
-
       Meteoros: <span id="mini-meteors">0</span><br>
       Livros: <span id="book-count">0</span><br>
-
       Gravidade: <span id="gravity-status">1x</span><br>
       FPS: <span id="fps">0</span>
     </div>
@@ -1101,7 +1099,7 @@ if (selectedBook && selectedBook.sprite) {
   { cover: 'capas/livro439.png', pdf: 'livros/livro439.pdf', title: 'Livro 439' }
       ];
       function createBookCovers() {
-  const bookCount = Math.min(430, bookData.length);
+  const bookCount = Math.min(415, bookData.length);
   for (let i = 0; i < bookCount; i++) {
           const randomFactor = Math.pow(Math.random(), 0.25);
           const radius = 4 + randomFactor * 22;
