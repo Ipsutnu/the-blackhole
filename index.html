@@ -152,8 +152,6 @@ canvas, body { touch-action: none; -webkit-user-select: none; user-select: none;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.autoClear = false;
       document.body.appendChild(renderer.domElement);
-
-// ====== MOBILE: Toque, Pinça, 3-dedos, Fullscreen ======
 const canvas = renderer.domElement;
 const PI = Math.PI;
 const EPS = 0.001;
@@ -165,9 +163,9 @@ function applyCoversMuted(flag) {
     bookSystem.books.forEach(b => { if (b.sprite) b.sprite.visible = !flag; });
   }
 }
-const isPhoneLike = /Android.+Mobile|iPhone|iPod/i.test(navigator.userAgent || "");
-document.addEventListener('DOMContentLoaded', () => {
-    if (typeof isPhoneLike !== 'undefined' ? isPhoneLike : /Android.+Mobile|iPhone|iPod/i.test(navigator.userAgent || "")) {
+ const isPhoneLike = /Android.+Mobile|iPhone|iPod/i.test(navigator.userAgent || "");
+  document.addEventListener('DOMContentLoaded', () => {
+    if (isPhoneLike) {
       const hint = document.getElementById('hint');
       if (hint) hint.style.display = 'none';
     }
