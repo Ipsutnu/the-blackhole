@@ -2,10 +2,14 @@
 <html lang="pt-br">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
     <title>The Blackhole</title>
 	<link rel="icon" href="icon.png" type="image/png">
     <style>
+		html, body { overscroll-behavior: none; }
+canvas, body { touch-action: none; -webkit-user-select: none; user-select: none; }
       :root { color-scheme: dark; }
       * { box-sizing: border-box; }
       html, body { height: 100%; margin: 0; }
@@ -148,6 +152,124 @@
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.autoClear = false;
       document.body.appendChild(renderer.domElement);
+
+// ====== MOBILE: Toque, Pinça, 3-dedos, Fullscreen ======
+const canvas = renderer.domElement;
+const PI = Math.PI;
+const EPS = 0.001;
+
+let coversMuted = (typeof window.coversMuted === 'boolean') ? window.coversMuted : false;
+function applyCoversMuted(flag) {
+  coversMuted = flag;
+  if (window.bookSystem && Array.isArray(bookSystem.books)) {
+    bookSystem.books.forEach(b => { if (b.sprite) b.sprite.visible = !flag; });
+  }
+}
+const isPhoneLike = /Android.+Mobile|iPhone|iPod/i.test(navigator.userAgent || "");
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof isPhoneLike !== 'undefined' ? isPhoneLike : /Android.+Mobile|iPhone|iPod/i.test(navigator.userAgent || "")) {
+      const hint = document.getElementById('hint');
+      if (hint) hint.style.display = 'none';
+    }
+  });
+let triedFS = false;
+function requestFSOnce() {
+  if (!isPhoneLike) return;
+  if (document.fullscreenElement || triedFS) return;
+  triedFS = true;
+  const el = renderer.domElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+  if (req) {
+    Promise.resolve(req.call(el)).catch(err => {
+      console.warn('Fullscreen negado:', err.name, err.message);
+      triedFS = false;
+    });
+  }
+}
+canvas.addEventListener('touchstart', requestFSOnce, { passive:false });
+canvas.addEventListener('touchmove',  e => e.preventDefault(), { passive:false });
+document.addEventListener('gesturestart', e => e.preventDefault(), { passive:false });
+document.addEventListener('gesturechange', e => e.preventDefault(), { passive:false });
+const touchState = {
+  mode: null,
+  startX: 0, startY: 0,
+  startPhi: 0, startTheta: 0,
+  startDist: 0,
+  pinchStartDistance: 0,
+  threeTap: { active:false, t0:0, moved:false }
+};
+const ROT_SENS   = Math.PI;
+const MIN_PHI = 0.05, MAX_PHI = Math.PI - 0.05;
+function touchDistance(t0, t1) {
+  const dx = t1.clientX - t0.clientX;
+  const dy = t1.clientY - t0.clientY;
+  return Math.hypot(dx, dy);
+}
+canvas.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    touchState.mode = 'orbit';
+    touchState.startX = t.clientX;
+    touchState.startY = t.clientY;
+    touchState.startPhi = controls.camera.targetPhi ?? controls.camera.phi ?? 0;
+    touchState.startTheta = controls.camera.targetTheta ?? controls.camera.theta ?? 0;
+  } else if (e.touches.length === 2) {
+    const [t0, t1] = e.touches;
+    touchState.mode = 'pinch';
+    touchState.pinchStartDistance = touchDistance(t0, t1);
+    touchState.startDist = controls.camera.targetDistance ?? controls.camera.distance ?? 10;
+  } else if (e.touches.length === 3) {
+    touchState.threeTap.active = true;
+    touchState.threeTap.t0 = performance.now();
+    touchState.threeTap.moved = false;
+  }
+}, { passive:false });
+canvas.addEventListener('touchmove', (e) => {
+  if (e.touches.length === 1 && touchState.mode === 'orbit') {
+    const t = e.touches[0];
+    const dx = (t.clientX - touchState.startX) / canvas.clientWidth;
+    const dy = (t.clientY - touchState.startY) / canvas.clientHeight;
+    const targetTheta = touchState.startTheta - dx * ROT_SENS;
+    let   targetPhi   = touchState.startPhi   - dy * ROT_SENS;
+    targetPhi = Math.max(MIN_PHI, Math.min(MAX_PHI, targetPhi));
+    controls.camera.targetTheta = targetTheta;
+    controls.camera.targetPhi   = targetPhi;
+  } else if (e.touches.length === 2) {
+    const [t0, t1] = e.touches;
+    const curD = touchDistance(t0, t1);
+    const ratio = (curD > 0 && touchState.pinchStartDistance > 0)
+      ? (curD / touchState.pinchStartDistance)
+      : 1;
+    let target = touchState.startDist / ratio;
+    const minD = controls.minDistance ?? 1.0;
+    const maxD = controls.maxDistance ?? 100.0;
+    target = Math.max(minD, Math.min(maxD, target));
+    controls.camera.targetDistance = target;
+  } else if (e.touches.length >= 3 && touchState.threeTap.active) {
+    touchState.threeTap.moved = true;
+  }
+}, { passive:false });
+canvas.addEventListener('touchend', (e) => {
+  if (touchState.threeTap.active && e.touches.length === 0) {
+    const dt = performance.now() - touchState.threeTap.t0;
+    if (dt < 300 && !touchState.threeTap.moved) {
+      applyCoversMuted(!coversMuted);
+    }
+    touchState.threeTap.active = false;
+  }
+  if (e.touches.length === 0) {
+    touchState.mode = null;
+  } else if (e.touches.length === 1) {
+    touchState.mode = 'orbit';
+    const t = e.touches[0];
+    touchState.startX = t.clientX;
+    touchState.startY = t.clientY;
+    touchState.startPhi = controls.camera.targetPhi ?? controls.camera.phi ?? 0;
+    touchState.startTheta = controls.camera.targetTheta ?? controls.camera.theta ?? 0;
+  }
+}, { passive:false });
+document.addEventListener('dblclick', e => e.preventDefault(), { passive:false });
+		
 let coversMuted = false;
 function setCoversMuted(on) {
   coversMuted = on;
