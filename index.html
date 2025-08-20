@@ -307,6 +307,13 @@ if (selectedBook && holdMs > 350) {
   isDraggingOrbit = false;
   return;
 }
+	if (navigator.vibrate && holdMs > 650) {
+  lastTouchPos.x = t.clientX;
+  lastTouchPos.y = t.clientY;
+  lastTouchPos.active = true;
+  isDraggingOrbit = false;
+  return;
+}
   if ((dx + dy) > CLICK_TOL) {
     isDraggingOrbit = true;
   }
@@ -830,7 +837,7 @@ if (warp.active && warp.phase === 'preBack') {
     if (selectedBook && selectedBook.sprite) {
       const bookPos = selectedBook.sprite.position.clone();
   const dirDyn  = bookPos.clone().sub(camera.position).normalize();
-  let stopDist = 1.5;
+  let stopDist = 1.6;
   if ((window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
       || ('ontouchstart' in window)
       || (navigator.maxTouchPoints > 0)) {
