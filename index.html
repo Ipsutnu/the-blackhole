@@ -307,7 +307,7 @@ if (selectedBook && holdMs > 350) {
   isDraggingOrbit = false;
   return;
 }
-	if (navigator.vibrate && holdMs > 650) {
+	if (navigator.vibrate && holdMs > 450) {
   lastTouchPos.x = t.clientX;
   lastTouchPos.y = t.clientY;
   lastTouchPos.active = true;
