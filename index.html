@@ -829,10 +829,15 @@ if (warp.active && warp.phase === 'preBack') {
   if (warp.active && warp.phase === 'go') {
     if (selectedBook && selectedBook.sprite) {
       const bookPos = selectedBook.sprite.position.clone();
-      const dirDyn = bookPos.clone().sub(camera.position).normalize();
-      const stopDist = 1.5;
-      warp.target.copy(bookPos).addScaledVector(dirDyn, -stopDist);
-      warp.look.copy(bookPos);
+  const dirDyn  = bookPos.clone().sub(camera.position).normalize();
+  let stopDist = 1.5;
+  if ((window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+      || ('ontouchstart' in window)
+      || (navigator.maxTouchPoints > 0)) {
+    stopDist = 2.4;
+  }
+  warp.target.copy(bookPos).addScaledVector(dirDyn, -stopDist);
+  warp.look.copy(bookPos);
     }
     const toTarget = warp.target.clone().sub(camera.position);
     const dist = toTarget.length();
@@ -868,7 +873,7 @@ if (dist <= warp.minDist && warp.v < 0.25) {
 if (selectedBook && selectedBook.sprite) {
   const bookPos = selectedBook.sprite.position.clone();
   camera.lookAt(bookPos);
-  camera.fov += (30 - camera.fov) * 0.05;
+  camera.fov += (20 - camera.fov) * 0.05;
   camera.updateProjectionMatrix();
   return;
 }
