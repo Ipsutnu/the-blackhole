@@ -184,6 +184,133 @@ function openSelectedBookIfTap() {
     window.open(selectedBook.pdf, '_blank', 'noopener,noreferrer');
   }
 }
+const MOB_FAV_HOLD_MS = 450;
+let mobFavT = null, mobFavTriggered = false;
+function getGlowDotTexture() {
+  if (getGlowDotTexture.tex) return getGlowDotTexture.tex;
+
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0.00, 'rgba(255,255,255,1.0)');
+  g.addColorStop(0.20, 'rgba(255,255,255,0.9)');
+  g.addColorStop(0.60, 'rgba(255,255,255,0.18)');
+  g.addColorStop(1.00, 'rgba(255,255,255,0.0)');
+
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(32, 32, 32, 0, Math.PI * 2); ctx.fill();
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+
+  getGlowDotTexture.tex = tex;
+  return tex;
+}
+function getBookUnderPointer() {
+  const b = (bookSystem && bookSystem.hoveredBook) ? bookSystem.hoveredBook : null;
+  return (b && b.sprite) ? b : null;
+}
+const FAV_STORE_KEY = 'bh_fav_books_v1';
+const favSet     = new Set(JSON.parse(localStorage.getItem(FAV_STORE_KEY) || '[]'));
+const favMarkers = new Map();
+
+function bookKey(book) {
+  return book?.pdf || book?.cover || book?.title || book?.id || book?.name;
+}
+function makeMiniJetMarkerFor(book) {
+  const g = new THREE.Group();
+  const spr = book.sprite;
+  const base = 1;
+const H = 1.4 * base;
+const R = 0.04 * base;
+  const geo = new THREE.ConeGeometry(R, H, 16, 1, true);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffffff, transparent: true, opacity: 0.25,
+    side: THREE.DoubleSide, blending: THREE.AdditiveBlending, transparent: true,
+      depthTest: true, depthWrite: false
+  });
+  const up = new THREE.Mesh(geo, mat);   up.position.y =  H * 0.5;
+  const dn = new THREE.Mesh(geo, mat);   dn.position.y = -H * 0.5; dn.rotation.x = Math.PI;
+  g.add(up, dn);
+const glowMat = new THREE.SpriteMaterial({
+  map: getGlowDotTexture(),
+  color: 0xffffff,
+  transparent: true,
+  opacity: 0.2,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false
+});
+const glow = new THREE.Sprite(glowMat);
+glow.scale.set(1.0, 1.0, 0.3);
+g.add(glow);
+g.userData.glow = glow;
+  g.userData.follow = spr;
+  g.userData.seed   = Math.random() * Math.PI * 2;
+const halo = new THREE.Group();
+g.add(halo);
+const COUNT   = 13;
+const RING_R  = 0.4;
+const SPREAD_R = 0.1;
+const SPREAD_Y = 0.25;
+const pos = new Float32Array(COUNT * 4);
+for (let i = 0; i < COUNT; i++) {
+  const a = (i / COUNT) * Math.PI * 2;
+  const r = RING_R + (Math.random() * 2 - 1) * SPREAD_R;
+  const y = (Math.random() * 2 - 1) * SPREAD_Y;
+
+  const k = i * 4;
+  pos[k + 0] = Math.cos(a) * r;
+  pos[k + 1] = y;
+  pos[k + 2] = Math.sin(a) * r;
+  pos[k + 3] = 1;
+}
+const haloGeom = new THREE.BufferGeometry();
+haloGeom.setAttribute('position', new THREE.BufferAttribute(pos, 4));
+const haloMat = new THREE.PointsMaterial({
+  color: 0xffffff,
+  size: 0.1,
+  sizeAttenuation: true,
+  map: getGlowDotTexture(),
+  alphaTest: 0.01,
+  transparent: true,
+  opacity: 0.7,
+  depthWrite: false,
+  depthTest: true,
+  blending: THREE.AdditiveBlending
+});
+const haloPoints = new THREE.Points(haloGeom, haloMat);
+halo.add(haloPoints);
+g.userData.halo = halo;
+g.userData.haloSpeed = 0.8 + Math.random() * 0.6;
+  return g;
+}
+function addFavMarker(book) {
+  const key = bookKey(book);
+  if (!key || favMarkers.has(key)) return;
+  const marker = makeMiniJetMarkerFor(book);
+  favMarkers.set(key, marker);
+  scene.add(marker);
+}
+function removeFavMarker(book) {
+  const key = bookKey(book);
+  const g = favMarkers.get(key);
+  if (!g) return;
+  scene.remove(g);
+  g.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+  favMarkers.delete(key);
+}
+function toggleFavorite(book) {
+  const key = bookKey(book);
+  if (!key) return;
+  if (favSet.has(key)) { favSet.delete(key); removeFavMarker(book); }
+  else { favSet.add(key); addFavMarker(book); }
+  localStorage.setItem(FAV_STORE_KEY, JSON.stringify([...favSet]));
+  if (navigator.vibrate) navigator.vibrate(30);
+}
 const NDC_HOVER_TOL = 0.12;
 const _hoverV = new THREE.Vector3();
 let lastTouchPos = { x: 0, y: 0, active: false };
@@ -284,6 +411,18 @@ isDraggingOrbit = false;
     touchState.startY = t.clientY;
     touchState.startPhi = controls.camera.targetPhi ?? controls.camera.phi ?? 0;
     touchState.startTheta = controls.camera.targetTheta ?? controls.camera.theta ?? 0;
+clearTimeout(mobFavT);
+mobFavTriggered = false;
+mobFavT = setTimeout(() => {
+  if (!selectedBook || !selectedBook.sprite) return;
+  const t = e.touches[0];
+  updateMobileHoverAt(t.clientX, t.clientY);
+  if (bookSystem.hoveredBook === selectedBook) {
+    toggleFavorite(selectedBook);
+    mobFavTriggered = true;
+    if (navigator.vibrate) navigator.vibrate(30);
+  }
+}, MOB_FAV_HOLD_MS);
   } else if (e.touches.length === 2) {
     const [t0, t1] = e.touches;
     touchState.mode = 'pinch';
@@ -298,11 +437,18 @@ isDraggingOrbit = false;
 canvas.addEventListener('touchmove', (e) => {
   if (e.touches.length === 1 && touchState.mode === 'orbit') {
     const t = e.touches[0];
+updateMobileHoverAt(e.touches[0].clientX, e.touches[0].clientY);
+const _favDX = Math.abs(e.touches[0].clientX - tapDownX);
+const _favDY = Math.abs(e.touches[0].clientY - tapDownY);
+if ((_favDX + _favDY) > CLICK_TOL && mobFavT) {
+  clearTimeout(mobFavT);
+  mobFavT = null;
+}
 if (!isDraggingOrbit) {
   const dx = Math.abs(t.clientX - tapDownX);
   const dy = Math.abs(t.clientY - tapDownY);
   const holdMs = performance.now() - tapDownT;
-if (selectedBook && holdMs > 350) {
+if (selectedBook && holdMs > 350 && bookSystem.hoveredBook !== selectedBook) {
   lastTouchPos.x = t.clientX;
   lastTouchPos.y = t.clientY;
   lastTouchPos.active = true;
@@ -350,6 +496,9 @@ canvas.addEventListener('touchend', (e) => {
  if (e.touches.length === 0) {
     lastTouchPos.active = false;
     touchState.mode = null;
+	clearTimeout(mobFavT);
+mobFavT = null;
+mobFavTriggered = false;
   } else if (e.touches.length === 1) {
     const dt = performance.now() - touchState.threeTap.t0;
     if (dt < 300 && !touchState.threeTap.moved) {
@@ -421,6 +570,29 @@ canvasEl.addEventListener('pointerup', () => {
   _down = null;
   setTimeout(() => { _dragging = false; }, 0);
 });
+const FAV_HOLD_MS  = 450;
+const FAV_MOVE_TOL = 8;
+let favHoldT = null, favHoldAt = {x:0, y:0};
+
+canvasEl.addEventListener('pointerdown', (e) => {
+  if (e.button !== 2) return;
+  const book = getBookUnderPointer();
+  if (book) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof favHoldT !== 'undefined' && favHoldT) { clearTimeout(favHoldT); favHoldT = null; }
+
+    toggleFavorite(book);
+    return;
+  }
+  isGravityAltered = true;
+}, { passive: false });
+
+canvasEl.addEventListener('pointerup', (e) => {
+  if (e.button === 2) {
+    isGravityAltered = false;
+  }
+}, { passive: true });
 const SPHERICAL_COMET_CONFIG = {
   count: 2,
   radius: 1000,
@@ -668,15 +840,28 @@ class ExplosionManager {
   }
 }
 const explosionManager = new ExplosionManager(scene);
+function isBookFavorited(book) {
+  if (!book) return false;
+  if (book.isFavorite || book._favorite || book._fav) return true;
+  if (book.sprite && (book.sprite.userData?.isFavorite || book.sprite.userData?.fav)) return true;
+  const key = book.title || book.pdf || book.cover || book.id || book.name;
+  if (!key) return false;
+  try {
+    const arr = JSON.parse(localStorage.getItem('bh_fav_books_v1') || '[]');
+    return Array.isArray(arr) && arr.includes(key);
+  } catch (_) {
+    return false;
+  }
+}
 function pickRandomEligibleBook() {
   const candidates = bookSystem.books.filter(b =>
-    b && b.sprite && b.sprite.visible !== false && !b._exploded && (selectedBook !== b)
+    b && b.sprite && b.sprite.visible !== false && !b._exploded && (selectedBook !== b) && !isBookFavorited(b)
   );
   if (!candidates.length) return null;
   return candidates[Math.floor(Math.random()*candidates.length)];
 }
 function explodeBook(book) {
-  if (!book || book._exploded) return;
+  if (!book || book._exploded || isBookFavorited(book)) return;
   book._exploded = true;
   const p = book.sprite.position.clone();
   book.sprite.visible = false;
@@ -1379,6 +1564,7 @@ sprite.renderOrder = 1500;
           };
           bookSystem.books.push(bookObject);
           scene.add(sprite);
+if (favSet.has(bookKey(bookObject))) addFavMarker(bookObject);
         }
         document.getElementById('book-count').textContent = bookCount;
       }
@@ -2084,6 +2270,15 @@ function updateMiniMeteors(deltaTime) {
       });
       createBookCovers();
 	startExplosionScheduler();
+	function restoreFavoritesOnce() {
+  const arr = (bookSystem?.books || []);
+  if (!arr.length) return;
+  favSet.forEach(key => {
+    const b = arr.find(bb => bookKey(bb) === key);
+    if (b && b.sprite) addFavMarker(b);
+  });
+}
+restoreFavoritesOnce();
       let time = 0;
       let frameCount = 0;
       let lastTime = Date.now();
@@ -2115,6 +2310,34 @@ function updateMiniMeteors(deltaTime) {
         frameCount++;
 sphericalComets.update(deltaTime);
         updateCamera();
+		
+		if (favMarkers.size) {
+  const tmp = new THREE.Vector3();
+  favMarkers.forEach((g) => {
+    const spr = g.userData.follow;
+    if (!spr) return;
+    spr.getWorldPosition(tmp);
+    g.position.copy(tmp);
+const muted = (typeof coversMuted !== 'undefined') && coversMuted;
+  g.visible = (spr.visible !== false) && !muted;
+    const t = time * 0.8 + g.userData.seed;
+    g.rotation.set(0, Math.sin(t) * 0.35, 0);
+    if (g.userData.halo) {
+      const speed = g.userData.haloSpeed || 0.01;
+      if (g.userData.haloAngle == null) {
+        g.userData.haloAngle = Math.random() * Math.PI * 2;
+      }
+      g.userData.haloAngle += deltaTime * speed;
+      g.userData.halo.rotation.y = g.userData.haloAngle;
+      const s = 1.0 + Math.sin(time * 3.0 + g.userData.seed) * 0.03;
+      g.userData.halo.scale.set(s, s, s);
+    }
+	if (g.userData.glow) {
+  const pulse = 1.0 + Math.sin(time * 2.0 + g.userData.seed) * 0.1;
+  g.userData.glow.scale.set(1.8 * pulse, 1.8 * pulse, 0.8);
+}
+  });
+}
 		if (lastTouchPos.active) {
   if (selectedBook && isDraggingOrbit) {
     setHoveredBookMobile(null);
@@ -2403,7 +2626,6 @@ explosionManager.update(deltaTime);
   window.addEventListener('mousemove', onActivity, { passive: true });
   window.addEventListener('mousedown', onActivity, { passive: true });
   window.addEventListener('pointermove', onActivity, { passive: true });
-  window.addEventListener('touchstart', onActivity,  { passive: true });
   reset();
 })();
       animate();
