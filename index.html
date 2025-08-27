@@ -78,6 +78,46 @@ a:focus { outline: none; }
         z-index: 50;
         display: none;
       }
+	  #fov-slider{
+  -webkit-appearance: none;
+  appearance: none;
+  width: 120px;
+  background: transparent;
+}
+#fov-slider::-webkit-slider-runnable-track{
+  height: 1px;
+  background: rgba(255,255,255,0.95);
+  border-radius: 2px;
+}
+#fov-slider::-webkit-slider-thumb{
+  -webkit-appearance: none;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid rgba(0,0,0,0.35);
+  margin-top: -4px;
+}
+#fov-slider::-moz-range-track{
+  height: 2px;
+  background: rgba(255,255,255,0.95);
+  border-radius: 2px;
+}
+#fov-slider::-moz-range-thumb{
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid rgba(0,0,0,0.35);
+}
+#hint input#fov-slider { pointer-events: auto; }
+	  #help{
+  position: fixed; display: none;
+  top: 20px; left: 20px; right: auto;
+  color: rgba(255,255,255,0.9);
+  font-size: 12px; background: rgba(0,0,0,0.5);
+  padding: 12px; border-radius: 6px; backdrop-filter: blur(8px);
+  z-index: 90; border: 1px solid rgba(255,255,255,0.1);
+  max-width: 320px; line-height: 1.4;
+}
       #debug {
         position: fixed;
 		display: none;
@@ -141,8 +181,29 @@ a:focus { outline: none; }
       Erro ao carregar Three.js<br>
       <small>Verifique sua conexão com a internet</small>
     </div>
-    <div id="hint"> Duplo clique: Mini meteoros • <a href="#" id="reset">Resetar Câmera</a> • <a href="#" id="toggle-debug">Debug Mode</a> • <a href="#" id="toggle-warp"></a> <a href="#" id="toggle-covers">Desabilitar Livros</a> • Botão direito: Acelerar gravidade</div>
-    <div id="debug">
+    <div id="hint" style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+  <div class="fov-row" style="display:flex; align-items:center; gap:8px; pointer-events:auto;">
+    <label for="fov-slider"></label>
+    <input id="fov-slider" type="range" min="20" max="110" step="1" value="60" style="width:120px;">
+  </div>
+  <div class="btn-row" style="pointer-events:auto; text-align:center;">
+    <a href="#" id="toggle-help">Ajuda</a> •
+    <a href="#" id="reset">Resetar Câmera</a> •
+    <a href="#" id="toggle-debug">Debug Mode</a> •
+    <a href="#" id="toggle-warp"></a>
+    <a href="#" id="toggle-covers">Desabilitar Livros</a>
+  </div>
+</div>
+    <div id="help" style="display:none">
+  <div style="font-weight:600;margin-bottom:6px">Controles rápidos</div>
+  • Mouse: arrastar para orbitar • Rodinha: zoom/warp<br>
+  • Duplo clique: Mini meteoros<br>
+  • Botão direito: Acelerar gravidade<br>
+  • Clique direito numa capa: favoritar/desfavoritar<br>
+  • Space: acelerar • Shift: ré • WASD: mirar<br>
+  • Desabilitar Livros: oculta capas
+</div>
+	<div id="debug">
       Distância: <span id="distance">0</span> UA<br>
       Meteoros: <span id="mini-meteors">0</span><br>
       Livros: <span id="book-count">0</span><br>
@@ -159,6 +220,25 @@ a:focus { outline: none; }
       }
       document.getElementById('loading').style.display = 'none';
       const scene = new THREE.Scene();
+const bhCore = new THREE.Group();
+bhCore.position.set(0,0,0);
+scene.add(bhCore);
+const geoPyr = new THREE.TetrahedronGeometry(0.333);
+const matPyr = new THREE.MeshBasicMaterial({
+  color: 0xffffff,
+  transparent: true,
+  opacity: 0.95,
+  depthTest: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending
+});
+const pyrA = new THREE.Mesh(geoPyr, matPyr);
+const pyrB = new THREE.Mesh(geoPyr, matPyr);
+pyrB.rotation.y = Math.PI * 0.5;
+pyrA.renderOrder = 3000;
+pyrB.renderOrder = 3000;
+bhCore.add(pyrA, pyrB);
+window.__bhCore = { group: bhCore, a: pyrA, b: pyrB };
       const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
       camera.position.set(0, 8, 15);
       const renderer = new THREE.WebGLRenderer({ 
@@ -166,6 +246,38 @@ a:focus { outline: none; }
         powerPreference: "high-performance",
         precision: "highp"
       });
+	  let userFOV = camera.fov;
+const fovSlider  = document.getElementById('fov-slider');
+const fovReadout = document.getElementById('fov-readout');
+window._uiOrbitLock = false;
+function _lockOrbit(){ window._uiOrbitLock = true; }
+function _unlockOrbit(){ window._uiOrbitLock = false; }
+if (fovSlider){
+  const stop = (e)=>{ e.stopPropagation(); };
+  fovSlider.addEventListener('pointerdown', (e)=>{ _lockOrbit(); stop(e); }, {passive:false});
+  fovSlider.addEventListener('pointerup',   (e)=>{ _unlockOrbit(); stop(e); }, {passive:true});
+  fovSlider.addEventListener('pointercancel', _unlockOrbit, {passive:true});
+  fovSlider.addEventListener('mouseleave',    _unlockOrbit, {passive:true});
+  fovSlider.addEventListener('touchstart', (e)=>{ _lockOrbit(); stop(e); }, {passive:false});
+  fovSlider.addEventListener('touchend',   (e)=>{ _unlockOrbit(); stop(e); }, {passive:true});
+  fovSlider.addEventListener('touchcancel',   _unlockOrbit, {passive:true});
+  fovSlider.addEventListener('mousedown',  (e)=>{ _lockOrbit(); stop(e); }, {passive:false});
+  fovSlider.addEventListener('mouseup',    (e)=>{ _unlockOrbit(); stop(e); }, {passive:true});
+  fovSlider.addEventListener('wheel', (e)=>{ e.stopPropagation(); }, {passive:false});
+  fovSlider.addEventListener('blur', _unlockOrbit);
+}
+function applyUserFOV(v){
+  const f = Math.max(20, Math.min(140, Number(v)||userFOV));
+  userFOV = f;
+  camera.fov = f;
+  camera.updateProjectionMatrix();
+  if (fovReadout) fovReadout.textContent = Math.round(f);
+}
+if (fovSlider){
+  fovSlider.value = String(Math.round(camera.fov));
+  if (fovReadout) fovReadout.textContent = String(Math.round(camera.fov));
+  fovSlider.addEventListener('input', e => applyUserFOV(e.target.value));
+}
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.setClearColor(0x000000);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -188,28 +300,24 @@ const MOB_FAV_HOLD_MS = 450;
 let mobFavT = null, mobFavTriggered = false;
 function getGlowDotTexture() {
   if (getGlowDotTexture.tex) return getGlowDotTexture.tex;
-
   const c = document.createElement('canvas');
   c.width = c.height = 64;
   const ctx = c.getContext('2d');
-
   const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
   g.addColorStop(0.00, 'rgba(255,255,255,1.0)');
   g.addColorStop(0.20, 'rgba(255,255,255,0.9)');
   g.addColorStop(0.60, 'rgba(255,255,255,0.18)');
   g.addColorStop(1.00, 'rgba(255,255,255,0.0)');
-
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(32, 32, 32, 0, Math.PI * 2); ctx.fill();
-
   const tex = new THREE.CanvasTexture(c);
   tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-
   getGlowDotTexture.tex = tex;
   return tex;
 }
+const orbitCenter = new THREE.Vector3(0, 0, 0);
 function getBookUnderPointer() {
   const b = (bookSystem && bookSystem.hoveredBook) ? bookSystem.hoveredBook : null;
   return (b && b.sprite) ? b : null;
@@ -261,7 +369,6 @@ for (let i = 0; i < COUNT; i++) {
   const a = (i / COUNT) * Math.PI * 2;
   const r = RING_R + (Math.random() * 2 - 1) * SPREAD_R;
   const y = (Math.random() * 2 - 1) * SPREAD_Y;
-
   const k = i * 4;
   pos[k + 0] = Math.cos(a) * r;
   pos[k + 1] = y;
@@ -375,7 +482,7 @@ const touchState = {
   threeTap: { active:false, t0:0, moved:false }
 };
 const ROT_SENS   = Math.PI;
-const MIN_PHI = 0.05, MAX_PHI = Math.PI - 0.05;
+const MIN_PHI = 0.0001, MAX_PHI = Math.PI - 0.0001;
 function touchDistance(t0, t1) {
   const dx = t1.clientX - t0.clientX;
   const dy = t1.clientY - t0.clientY;
@@ -747,6 +854,7 @@ class SphericalCometManager {
   controls.camera.targetPhi      = phi;
   controls.camera.theta          = theta;
   controls.camera.targetTheta    = theta;
+  
 }
       let isGravityAltered = false;
       let gravityMultiplier = 1.0;
@@ -759,6 +867,11 @@ class SphericalCometManager {
         raycaster: new THREE.Raycaster(),
         mouse: new THREE.Vector2()
       };
+	  function applyLookComp(offBefore, offAfter){
+  if (window.__appliedLookComp) return;
+  orbitCenter.add(offBefore.sub(offAfter));
+  window.__appliedLookComp = true;
+}
 function makeCircleSprite(size=1) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -902,6 +1015,41 @@ const warp = {
   fovHold: 95,
   fovTravel: 80
 };
+const LIGHT_ACCEL_MULT = 5.0;
+const LIGHT_DRAG_MULT  = 5.0;
+const LIGHT_BRAKE_MULT = 5.0;
+const flight = {
+  active: false,
+  forward: false,
+  reverse: false,
+  dir: new THREE.Vector3(0,0,-1),
+  speed: 0,
+  motionSign: 0,
+  accel: 2,
+  drag: 15,
+  brake: 0.5,
+  max: 20,
+  rot: 0.6,
+rotAccel: 5.0,
+rotFriction: 6.0,
+yawRate: 0,
+pitchRate: 0,
+  yaw: 0,
+  pitch: 0,
+  lightHold: 0,
+lightActive: false
+};
+const reticle = document.createElement('div');
+reticle.id = 'reticle-flight';
+reticle.style.cssText = `
+  position:fixed; left:50%; top:50%; width:5px; height:5px; margin:-2px 0 0 -2px;
+  border:2px solid rgba(255,255,255,.9); border-radius:50%;
+  box-shadow:0 0 14px rgba(255,255,255,.6), inset 0 0 10px rgba(255,255,255,.5);
+  pointer-events:none; opacity:0; transition:opacity .18s ease; z-index:9999; mix-blend-mode:screen;
+`;
+document.body.appendChild(reticle);
+const setCursorHidden = (on) => document.body.classList.toggle('cursor-off', on);
+const setReticleVisible = (on)=> reticle.style.opacity = on ? '1' : '0';
 function startWarpToBlackHole() {
   const dir0 = new THREE.Vector3();
   camera.getWorldDirection(dir0);
@@ -921,7 +1069,6 @@ function startWarpToBlackHole() {
     warp.focusT = 0;
     warp.focusV = 0;
 	 warp.fovStart  = camera.fov;
-    warp.fovTarget = 70;
     return;
   }
   selectedBook = null;
@@ -936,10 +1083,11 @@ function startWarpToBlackHole() {
   warp.look.copy(currentLookPoint);
   warp.fovTarget = 30;
 }
-window.addEventListener('wheel', () => {
-  if (selectedBook) {
-    startWarpToBlackHole();
-	event.preventDefault();
+window.addEventListener('wheel', (e) => {
+  const freeOrbit = (!selectedBook && (!warp || !warp.active) && orbitCenter.lengthSq() > 1e-6);
+  if (selectedBook || freeOrbit) {
+    if (!warp || !warp.active) startWarpToBlackHole();
+    e.preventDefault();
   }
 }, { passive: false });
 function startWarpTo(bookObj) {
@@ -993,6 +1141,7 @@ if (warp.active && warp.phase === 'preBack') {
   }
   return;
 }
+
   if (warp.active && warp.phase === 'focus') {
   warp.focusV += warp.focusA * delta;
   warp.focusT  = Math.min(1, warp.focusT + warp.focusV * delta);
@@ -1009,6 +1158,7 @@ if (warp.active && warp.phase === 'preBack') {
   if (warp.focusT >= 1) {
   const returningBH = !selectedBook || !selectedBook.sprite;
   if (returningBH) {
+  orbitCenter.set(0,0,0);
     snapOrbitToCurrentCamera(new THREE.Vector3(0,0,0));
     warp.active = false;
     warp.phase  = 'idle';
@@ -2262,12 +2412,55 @@ function updateMiniMeteors(deltaTime) {
         controls.camera.targetDistance = 12;
         controls.camera.targetPhi = Math.PI * 0.3;
         controls.camera.targetTheta = 0;
+		startWarpToBlackHole()
       });
       document.getElementById('toggle-warp').addEventListener('click', (e) => {
         e.preventDefault();
         controls.warpSpace = !controls.warpSpace;
         blackHoleMaterial.uniforms.uWarpSpace.value = controls.warpSpace;
       });
+	  const keys = { w:false, a:false, s:false, d:false };
+window.addEventListener('keydown', (e) => {
+if (e.code === 'Space') {
+  flight.active = true;
+  flight.forward = true;
+  flight.reverse = false;
+  setReticleVisible(true);
+  setCursorHidden(true);
+  e.preventDefault();
+}
+if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+  flight.active = true;
+  flight.reverse = true;
+  flight.forward = false;
+  setReticleVisible(true);
+  setCursorHidden(true);
+  flight.lightHold = 0;
+  flight.lightActive = false;
+  e.preventDefault();
+}
+  if (e.code === 'KeyW') flight.pitch = +1;
+  if (e.code === 'KeyS') flight.pitch = -1;
+  if (e.code === 'KeyA') flight.yaw   = -1;
+  if (e.code === 'KeyD') flight.yaw   = +1;
+}, false);
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') {
+  flight.forward = false;
+  flight.lightHold = 0;
+  flight.lightActive = false;
+}
+flight.active = (flight.forward || flight.reverse);
+setReticleVisible(flight.active);
+setCursorHidden(flight.active);
+if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { flight.reverse = false; }
+flight.active = (flight.forward || flight.reverse);
+setReticleVisible(flight.active);
+  if (e.code === 'KeyW' && flight.pitch === +1) flight.pitch = 0;
+  if (e.code === 'KeyS' && flight.pitch === -1) flight.pitch = 0;
+  if (e.code === 'KeyA' && flight.yaw   === -1) flight.yaw   = 0;
+  if (e.code === 'KeyD' && flight.yaw   === +1) flight.yaw   = 0;
+}, false);
       createBookCovers();
 	startExplosionScheduler();
 	function restoreFavoritesOnce() {
@@ -2297,20 +2490,184 @@ restoreFavoritesOnce();
     camera.position.copy(bookPos).add(off);
     camera.lookAt(bookPos);
   } else {
-    camera.position.copy(off);
-    camera.lookAt(0, 0, 0);
+    camera.position.set(
+    off.x + orbitCenter.x,
+    off.y + orbitCenter.y,
+    off.z + orbitCenter.z
+  );
+  camera.lookAt(orbitCenter);
   }
   virtualCamera.copy(camera.position);
 }
       function animate() {
+	  window.__appliedLookComp = false;
         const currentTime = Date.now();
         const deltaTime = (currentTime - lastTime) / 1000;
         lastTime = currentTime;
         time += deltaTime;
         frameCount++;
 sphericalComets.update(deltaTime);
+if (window.__bhCore) {
+  const t = time;
+  window.__bhCore.group.rotation.x = t * 0.6;
+  window.__bhCore.group.rotation.y = t * 0.4;
+  window.__bhCore.a.rotation.x = Math.sin(t * 1.3) * 0.9;
+  window.__bhCore.a.rotation.z = Math.cos(t * 1.1) * 0.9;
+
+  window.__bhCore.b.rotation.y = Math.PI * 0.5;
+  window.__bhCore.b.rotation.x = Math.cos(t * 0.8) * 1.1;
+  window.__bhCore.b.rotation.z = Math.sin(t * 0.9) * 1.1;
+}
+if (flight.forward) {
+  flight.lightHold += deltaTime;
+  flight.lightActive = (flight.lightHold >= 7.0);
+} else {
+  flight.lightHold = 0;
+  flight.lightActive = false;
+}
+if (!warp || !warp.active) {
+  const c = controls.camera;
+if (c._freezeOrbitMs && performance.now() < c._freezeOrbitMs) {
+  return;
+}
+c.distance += (c.targetDistance - c.distance) * controls.damping;
+if (c._skipDampOnce) {
+  c.phi   = c.targetPhi;
+  c.theta = c.targetTheta;
+  c._skipDampOnce = false;
+} else {
+  c.phi   += (c.targetPhi   - c.phi)   * controls.damping;
+  c.theta += (c.targetTheta - c.theta) * controls.damping;
+}
+camera.up.set(0, (c.upSign ?? 1), 0);
+
+if (flight.active) {
+  const desired = flight.forward ? +1 : -1;
+const camDir = new THREE.Vector3();
+  camera.getWorldDirection(camDir);
+  flight.dir.copy(camDir);
+  if (flight.motionSign === 0) {
+    flight.motionSign = desired;
+const LIGHT_ACCEL_MULT = 5.0;
+const accelNow = flight.accel * ((flight.lightActive && desired === +1) ? LIGHT_ACCEL_MULT : 1.0);
+if (flight.lightActive && desired === +1) {
+  flight.speed += accelNow * deltaTime;
+} else {
+  if (flight.speed > flight.max) {
+    flight.speed = Math.max(flight.speed - flight.drag * deltaTime, flight.max);
+  } else {
+    flight.speed = Math.min(flight.max, flight.speed + accelNow * deltaTime);
+  }
+}
+
+  } else if (flight.motionSign === desired) {
+const LIGHT_ACCEL_MULT = 5.0;
+const accelNow = flight.accel * ((flight.lightActive && desired === +1) ? LIGHT_ACCEL_MULT : 1.0);
+if (flight.lightActive && desired === +1) {
+  flight.speed += accelNow * deltaTime;
+} else {
+  if (flight.speed > flight.max) {
+    flight.speed = Math.max(flight.speed - flight.drag * deltaTime, flight.max);
+  } else {
+    flight.speed = Math.min(flight.max, flight.speed + accelNow * deltaTime);
+  }
+}
+  } else {
+const overspeed = (flight.speed > flight.max);
+const decelBase = (flight.drag + flight.brake);
+const decelNow  = decelBase * ((flight.lightActive || overspeed) ? LIGHT_BRAKE_MULT : 1.0);
+flight.speed = Math.max(0, flight.speed - decelNow * deltaTime);
+if (flight.speed <= 0.001) {
+  flight.speed = 0;
+  flight.motionSign = desired;
+  const accelNow = flight.accel * ((flight.lightActive && desired === +1) ? LIGHT_ACCEL_MULT : 1.0);
+  flight.speed = Math.min(flight.max, flight.speed + accelNow * deltaTime);
+}
+    if (flight.speed <= 0.001) {
+      flight.speed = 0;
+      flight.motionSign = desired;
+const LIGHT_ACCEL_MULT = 5.0;
+const accelNow = flight.accel * ((flight.lightActive && desired === +1) ? LIGHT_ACCEL_MULT : 1.0);
+if (flight.lightActive && desired === +1) {
+  flight.speed += accelNow * deltaTime;
+} else {
+  if (flight.speed > flight.max) {
+    flight.speed = Math.max(flight.speed - flight.drag * deltaTime, flight.max);
+  } else {
+    flight.speed = Math.min(flight.max, flight.speed + accelNow * deltaTime);
+  }
+}
+    }
+  }
+
+} else {
+const overspeed  = (flight.speed > flight.max);
+const dragNow    = (flight.lightActive || overspeed)
+  ? (flight.drag * LIGHT_DRAG_MULT)
+  :  flight.drag;
+flight.speed = Math.max(0, flight.speed - dragNow * deltaTime);
+if (flight.speed <= 0.001) { flight.speed = 0; flight.motionSign = 0; }
+}
+
+if (flight.speed > 0 && flight.motionSign !== 0) {
+  orbitCenter.addScaledVector(flight.dir, flight.motionSign * flight.speed * deltaTime);
+}
+  if (flight.yaw !== 0 || flight.pitch !== 0) {
+  const dTheta =  flight.yaw   * flight.rot * deltaTime;
+  const dPhi   = flight.pitch * flight.rot * deltaTime;
+  const r = c.distance;
+  const offBefore = new THREE.Vector3(
+    r * Math.sin(c.phi) * Math.cos(c.theta),
+    r * Math.cos(c.phi),
+    r * Math.sin(c.phi) * Math.sin(c.theta)
+  );
+c.theta += dTheta;
+c.pitchPolarity ??= 1;
+c.upSign        ??= 1;
+c.phi += dPhi * c.pitchPolarity;
+const TAU = Math.PI * 2;
+const TINY = 1e-5;
+if (c.phi < MIN_PHI) {
+  const over = MIN_PHI - c.phi;
+  c.phi   = MIN_PHI + over;
+  c.theta = ((c.theta + Math.PI) % TAU + TAU) % TAU;
+  c.pitchPolarity *= -1;
+  c.upSign        ??= 1;
+  c.upSign        *= -1;
+  c.phi         = MIN_PHI + TINY;
+  c.targetPhi   = c.phi;
+  c.targetTheta = c.theta;
+  c._skipDampOnce = true;
+  c._freezeOrbitMs = performance.now() + 1;
+  camera.up.set(0, c.upSign, 0);
+}
+else if (c.phi > MAX_PHI) {
+  const over = c.phi - MAX_PHI;
+  c.phi   = MAX_PHI - over;
+  c.theta = ((c.theta + Math.PI) % TAU + TAU) % TAU;
+  c.pitchPolarity *= -1;
+  c.upSign        ??= 1;
+  c.upSign        *= -1;
+
+  c.phi         = MAX_PHI - TINY;
+  c.targetPhi   = c.phi;
+  c.targetTheta = c.theta;
+  c._skipDampOnce = true;
+  c._freezeOrbitMs = performance.now() + 16;
+  camera.up.set(0, c.upSign, 0);
+}
+{ const TAU = Math.PI*2; c.theta = ((c.theta % TAU)+TAU)%TAU; }
+c.targetTheta = c.theta;
+c.targetPhi   = c.phi;
+  const offAfter = new THREE.Vector3(
+    r * Math.sin(c.phi) * Math.cos(c.theta),
+    r * Math.cos(c.phi),
+    r * Math.sin(c.phi) * Math.sin(c.theta)
+  );
+orbitCenter.add(offBefore.sub(offAfter));
+}
+}
         updateCamera();
-		
 		if (favMarkers.size) {
   const tmp = new THREE.Vector3();
   favMarkers.forEach((g) => {
@@ -2569,6 +2926,17 @@ if (book.isHovered && selectedBook !== book) {
         });
 updateRelativisticApproach(deltaTime);
 explosionManager.update(deltaTime);
+if (!warp || !warp.active){
+   const FOV_SMOOTH_TAU = 1.2;
+const alpha = 1 - Math.exp(-deltaTime / FOV_SMOOTH_TAU);
+
+const baseTarget  = flight.active ? (userFOV * 1.50) : userFOV;
+const lightTarget = userFOV * 2.90;
+const fovTarget   = Math.min(140, flight.lightActive ? lightTarget : baseTarget);
+
+camera.fov += (fovTarget - camera.fov) * alpha;
+camera.updateProjectionMatrix();
+ }
         renderer.clear();
         if (currentMode === renderModes.SHADER_ONLY) {
           blackHoleMaterial.uniforms.uMixFactor.value = 1.0;
@@ -2602,6 +2970,14 @@ explosionManager.update(deltaTime);
       debugPanel.style.display = 'none';
     }
   });
+  const toggleHelp = document.getElementById('toggle-help');
+if (toggleHelp){
+  toggleHelp.addEventListener('click', (e)=>{
+    e.preventDefault();
+    const help = document.getElementById('help');
+    help.style.display = (help.style.display === 'none') ? 'block' : 'none';
+  });
+}
   (function setupIdleHideCursor(opts = {}) {
   const delay = opts.delay ?? 10_000;
   const root = (typeof canvasEl !== 'undefined' && canvasEl) ? canvasEl : document.body;
