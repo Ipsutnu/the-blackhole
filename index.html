@@ -3337,17 +3337,16 @@ if (flight.forward) {
 }
 if (!warp || !warp.active) {
   const c = controls.camera;
-if (c._freezeOrbitMs && performance.now() < c._freezeOrbitMs) {
-  return;
-}
-c.distance += (c.targetDistance - c.distance) * controls.damping;
-if (c._skipDampOnce) {
-  c.phi   = c.targetPhi;
-  c.theta = c.targetTheta;
-  c._skipDampOnce = false;
-} else {
-  c.phi   += (c.targetPhi   - c.phi)   * controls.damping;
-  c.theta += (c.targetTheta - c.theta) * controls.damping;
+if (!(c._freezeOrbitMs && performance.now() < c._freezeOrbitMs)) {
+  c.distance += (c.targetDistance - c.distance) * controls.damping;
+  if (c._skipDampOnce) {
+    c.phi   = c.targetPhi;
+    c.theta = c.targetTheta;
+    c._skipDampOnce = false;
+  } else {
+    c.phi   += (c.targetPhi   - c.phi)   * controls.damping;
+    c.theta += (c.targetTheta - c.theta) * controls.damping;
+  }
 }
 camera.up.set(0, (c.upSign ?? 1), 0);
 
