@@ -1189,6 +1189,11 @@ function updateProjectileCollisionsAndBounds(){
   orbitCenter.add(offBefore.sub(offAfter));
   window.__appliedLookComp = true;
 }
+
+function explodeMeteorAt(pos) {
+  explosionManager.spawn(pos, { count: 3, life: 0.15 });
+}
+
 function makeCircleSprite(size=1) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -1328,6 +1333,250 @@ geom.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,0,0), 1e6);
     }
   }
 }
+
+// ======================================================
+// ===  OBSERVADOR LÚMEN — com fade e aparição cíclica ===
+// ======================================================
+class LightObserver {
+  constructor(scene, bhCenter, bhRadius) {
+    this.scene = scene;
+    this.center = bhCenter.clone();
+    this.radius = bhRadius * 3.0;
+    this.deepRadius = bhRadius * 1000.0; // raio das constelações
+    this.mesh = this._createMesh();
+    this.target = new THREE.Vector3();
+    this.transition = null;
+    this.phase = 'idle';
+    this.timer = 0;
+    this.behaviorTime = 0;
+    this.constellations = [];
+    this.appearanceTimer = 0;
+    this.visible = false;
+  }
+
+  _createMesh() {
+    const geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 1.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+
+    const glowMat = new THREE.SpriteMaterial({
+      map: getGlowDotTexture(),
+      color: 0x88ccff,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const glow = new THREE.Sprite(glowMat);
+    glow.scale.set(0.8, 0.8, 0.8);
+    mesh.add(glow);
+
+    mesh.visible = false; // invisível até o spawn
+    this.scene.add(mesh);
+    return mesh;
+  }
+
+  _spawn() {
+    this.visible = true;
+    this.mesh.visible = true;
+    this._chooseBehavior(true);
+    this.timer = 0;
+  }
+
+  _despawn() {
+  // Marcar invisível
+  this.visible = false;
+  this.mesh.visible = false;
+  for (const c of this.constellations) this.scene.remove(c);
+  this.constellations = [];
+
+  // --- EFEITO DE DESAPARECIMENTO HIPERLUMINAL ---
+
+  const start = this.mesh.position.clone();
+  const dir = randUnit().normalize(); // direção aleatória de partida
+  const end = start.clone().addScaledVector(dir, this.deepRadius * 3); // até o "infinito"
+
+  // Linha de luz principal
+  const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
+  const mat = new THREE.LineBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const line = new THREE.Line(geo, mat);
+  this.scene.add(line);
+
+  // Animação de fade da linha
+  const fadeTime = 2.0;
+  const startTime = performance.now();
+  const fade = () => {
+    const t = (performance.now() - startTime) / 1000;
+    mat.opacity = 1 - t / fadeTime;
+    if (t < fadeTime) requestAnimationFrame(fade);
+    else this.scene.remove(line);
+  };
+  fade();
+
+  // --- Cone de partículas para trás ---
+  const coneCount = 60;
+  for (let i = 0; i < coneCount; i++) {
+    const angle = (Math.random() * Math.PI * 2);
+    const spread = Math.pow(Math.random(), 0.5) * 0.5; // distribui em cone
+    const dirSpread = new THREE.Vector3(
+      dir.x * 1 + Math.cos(angle) * spread,
+      dir.y * 1 + Math.sin(angle) * spread,
+      dir.z * (1 - spread)
+    ).normalize();
+    const pos = start.clone();
+    const speed = 2 + Math.random() * 6;
+    const life = 0.8 + Math.random() * 1.2;
+    explosionManager.spawn(pos, { dir: dirSpread, speed, life, count: 1 });
+  }
+}
+
+  _chooseBehavior(first = false) {
+    const behaviors = ['orbit', 'zigzag', 'dash', 'drift', 'constellation'];
+    const next = behaviors[Math.floor(Math.random() * behaviors.length)];
+    this.phase = next;
+    this.timer = 0;
+    this.behaviorTime = 12 + Math.random() * 20;
+    let dest = this.mesh.position.clone();
+
+    if (this.phase === 'orbit') {
+      const angle = Math.random() * Math.PI * 2;
+      const orbitR = this.radius * 0.5;
+      dest = new THREE.Vector3(
+        this.center.x + Math.cos(angle) * orbitR,
+        this.center.y + Math.sin(angle * 0.5) * 0.6,
+        this.center.z + Math.sin(angle) * orbitR
+      );
+    } else if (this.phase === 'zigzag' || this.phase === 'drift') {
+      dest = this._randomTarget(this.radius);
+    } else if (this.phase === 'dash') {
+      const dir = randUnit();
+      dest = this.mesh.position.clone().add(dir.multiplyScalar(3.0));
+    } else if (this.phase === 'constellation') {
+      dest = this._randomTarget(this.deepRadius);
+      
+    }
+
+    if (!first) {
+      this.transition = {
+        start: this.mesh.position.clone(),
+        end: dest.clone(),
+        t: 0,
+        duration: 2.5 + Math.random() * 1.5
+      };
+    } else {
+      this.mesh.position.copy(dest);
+    }
+  }
+
+  _randomTarget(radius) {
+    const r = radius * (0.5 + Math.random() * 0.5);
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(Math.random() * 2 - 1);
+    return new THREE.Vector3(
+      this.center.x + r * Math.sin(phi) * Math.cos(theta),
+      this.center.y + r * Math.cos(phi),
+      this.center.z + r * Math.sin(phi) * Math.sin(theta)
+    );
+  }
+
+  _updateTransition(dt) {
+    if (!this.transition) return false;
+    const tr = this.transition;
+    tr.t += dt;
+    const k = Math.min(1, tr.t / tr.duration);
+    const smooth = 1 - Math.pow(1 - k, 3);
+    this.mesh.position.lerpVectors(tr.start, tr.end, smooth);
+    if (k >= 1) this.transition = null;
+    return true;
+  }
+
+  update(dt) {
+    this.appearanceTimer += dt;
+
+    // aparece a cada 3 minutos (180s)
+    if (!this.visible && this.appearanceTimer >= 180) {
+      this._spawn();
+      this.appearanceTimer = 0;
+    }
+
+    // desaparece automaticamente após completar comportamento
+    if (this.visible && this.timer > this.behaviorTime + 10) {
+      this._despawn();
+    }
+
+    if (!this.visible) return;
+
+    this.mesh.rotation.x += dt * 25;
+    this.mesh.rotation.y += dt * 30;
+    this.mesh.rotation.z += dt * 20;
+
+    if (this._updateTransition(dt)) return;
+
+    this.timer += dt;
+    if (this.timer > this.behaviorTime) this._chooseBehavior();
+
+    switch (this.phase) {
+      case 'orbit':
+      case 'zigzag':
+      case 'dash':
+      case 'drift':
+        // reaproveita os comportamentos antigos
+        // (mantenha os mesmos trechos que já tinha antes)
+        break;
+
+      case 'constellation': {
+        
+
+        const t = performance.now() * 0.0001;
+        const r = this.deepRadius;
+        this.mesh.position.set(
+          this.center.x + r * Math.cos(t * 3.1) * Math.sin(t * 1.7),
+          this.center.y + r * Math.sin(t * 2.3) * Math.sin(t * 1.1),
+          this.center.z + r * Math.cos(t * 1.9)
+        );
+        this.mesh.position.x += Math.sin(t * 1000) * 0.5;
+        this.mesh.position.y += Math.cos(t * 700) * 0.5;
+        this.mesh.position.z += Math.sin(t * 900) * 0.5;
+
+        
+        break;
+      }
+    }
+  }
+}
+
+// === Instanciar o observador após cena e buraco negro criados ===
+const lightObserver = new LightObserver(scene, BH_CENTER, BH_RADIUS);
+
+// === Atualizar no loop principal ===
+const _oldRenderLoop = renderer.setAnimationLoop || requestAnimationFrame;
+let _lastTime = performance.now();
+function animateLoop() {
+  const now = performance.now();
+  const dt = (now - _lastTime) / 1000;
+  _lastTime = now;
+
+  // Atualiza o observador procedural
+  lightObserver.update(dt);
+
+  // continua o loop original
+  if (typeof renderFrame === 'function') renderFrame(dt);
+  _oldRenderLoop(animateLoop);
+}
+animateLoop();
+
 function attractAndSnapMeteors(dt) {
   if (!Array.isArray(miniMeteors) || miniMeteors.length < 2) return;
 
@@ -1335,7 +1584,7 @@ function attractAndSnapMeteors(dt) {
   const ATTR_RADIUS2  = ATTR_RADIUS * ATTR_RADIUS;
   const ATTR_STRENGTH = 3.2;
   const SNAP_EPS      = 0.08;
-  const AGE_MS        = 8888;
+  const AGE_MS        = 8888; // <<<<<<<<<<<<<< meteoro só influencia se tiver > 5s
   const hasBH = (typeof BH_CENTER !== 'undefined') && (typeof BH_RADIUS !== 'undefined');
   const now = performance.now();
 
@@ -1350,6 +1599,8 @@ function attractAndSnapMeteors(dt) {
       if (!b?.mesh || b._trapped || b.rayAim) continue;
       const pb = b.mesh.position;
       const bBorn = b.spawnAt ?? b.bornAt ?? b.createdAt ?? b.created ?? b.t0 ?? 0;
+
+      // fora do BH (magnetismo não atua dentro)
       if (hasBH) {
         const mid = pa.clone().add(pb).multiplyScalar(0.5);
         if (mid.distanceTo(BH_CENTER) <= BH_RADIUS) continue;
@@ -1362,11 +1613,19 @@ function attractAndSnapMeteors(dt) {
       const dir = pb.clone().sub(pa).multiplyScalar(1 / d);
       const gain    = (1 - d / ATTR_RADIUS);
       const impulse = (ATTR_STRENGTH * gain) * dt;
-      const aCanBeInfluencedByB = (now - bBorn) >= AGE_MS;
-      const bCanBeInfluencedByA = (now - aBorn) >= AGE_MS;
+
+      // -------- GATING POR IDADE (>5s) --------
+      const aCanBeInfluencedByB = (now - bBorn) >= AGE_MS; // A só sente B se B for "velho"
+      const bCanBeInfluencedByA = (now - aBorn) >= AGE_MS; // B só sente A se A for "velho"
+
+      // aplica impulsos de forma independente
       if (aCanBeInfluencedByB) (a.velocity ||= new THREE.Vector3()).addScaledVector(dir,  +impulse);
       if (bCanBeInfluencedByA) (b.velocity ||= new THREE.Vector3()).addScaledVector(dir,  -impulse);
+
+      // se nenhum pode influenciar o outro ainda, não faz snap
       if (!(aCanBeInfluencedByB || bCanBeInfluencedByA)) continue;
+
+      // SNAP (alinhamento suave) quando muito próximos
       const ra = a.hitRadius ?? 0.06;
       const rb = b.hitRadius ?? 0.06;
       const want = Math.max(SNAP_EPS, (ra + rb) * 0.9);
@@ -1381,6 +1640,8 @@ function attractAndSnapMeteors(dt) {
 
         a.mesh.position.copy(newA); if (a.position) a.position.copy(newA);
         b.mesh.position.copy(newB); if (b.position) b.position.copy(newB);
+
+        // empurrinho extra só para quem PODE ser influenciado
         if (aCanBeInfluencedByB) a.velocity.addScaledVector(nudge, +impulse * 0.5);
         if (bCanBeInfluencedByA) b.velocity.addScaledVector(nudge, -impulse * 0.5);
       }
@@ -1698,447 +1959,7 @@ if (selectedBook && selectedBook.sprite) {
   return;
 }
 }
-      const bookData = [
-        { cover: 'capas/livro1.png', pdf: 'livros/livro1.pdf', title: 'Livro 1' },
-        { cover: 'capas/livro2.png', pdf: 'livros/livro2.pdf', title: 'Livro 2' },
-        { cover: 'capas/livro3.png', pdf: 'livros/livro3.pdf', title: 'Livro 3' },
-        { cover: 'capas/livro4.png', pdf: 'livros/livro4.pdf', title: 'Livro 4' },
-        { cover: 'capas/livro5.png', pdf: 'livros/livro5.pdf', title: 'Livro 5' },
-        { cover: 'capas/livro6.png', pdf: 'livros/livro6.pdf', title: 'Livro 6' },
-        { cover: 'capas/livro7.png', pdf: 'livros/livro7.pdf', title: 'Livro 7' },
-        { cover: 'capas/livro8.png', pdf: 'livros/livro8.pdf', title: 'Livro 8' },
-        { cover: 'capas/livro9.png', pdf: 'livros/livro9.pdf', title: 'Livro 9' },
-        { cover: 'capas/livro10.png', pdf: 'livros/livro10.pdf', title: 'Livro 10' },
-  { cover: 'capas/livro11.png', pdf: 'livros/livro11.pdf', title: 'Livro 11' },
-  { cover: 'capas/livro12.png', pdf: 'livros/livro12.pdf', title: 'Livro 12' },
-  { cover: 'capas/livro13.png', pdf: 'livros/livro13.pdf', title: 'Livro 13' },
-  { cover: 'capas/livro14.png', pdf: 'livros/livro14.pdf', title: 'Livro 14' },
-  { cover: 'capas/livro15.png', pdf: 'livros/livro15.pdf', title: 'Livro 15' },
-  { cover: 'capas/livro16.png', pdf: 'livros/livro16.pdf', title: 'Livro 16' },
-  { cover: 'capas/livro17.png', pdf: 'livros/livro17.pdf', title: 'Livro 17' },
-  { cover: 'capas/livro18.png', pdf: 'livros/livro18.pdf', title: 'Livro 18' },
-  { cover: 'capas/livro19.png', pdf: 'livros/livro19.pdf', title: 'Livro 19' },
-  { cover: 'capas/livro20.png', pdf: 'livros/livro20.pdf', title: 'Livro 20' },
-  { cover: 'capas/livro21.png', pdf: 'livros/livro21.pdf', title: 'Livro 21' },
-  { cover: 'capas/livro22.png', pdf: 'livros/livro22.pdf', title: 'Livro 22' },
-  { cover: 'capas/livro23.png', pdf: 'livros/livro23.pdf', title: 'Livro 23' },
-  { cover: 'capas/livro24.png', pdf: 'livros/livro24.pdf', title: 'Livro 24' },
-  { cover: 'capas/livro25.png', pdf: 'livros/livro25.pdf', title: 'Livro 25' },
-  { cover: 'capas/livro26.png', pdf: 'livros/livro26.pdf', title: 'Livro 26' },
-  { cover: 'capas/livro27.png', pdf: 'livros/livro27.pdf', title: 'Livro 27' },
-  { cover: 'capas/livro28.png', pdf: 'livros/livro28.pdf', title: 'Livro 28' },
-  { cover: 'capas/livro29.png', pdf: 'livros/livro29.pdf', title: 'Livro 29' },
-  { cover: 'capas/livro30.png', pdf: 'livros/livro30.pdf', title: 'Livro 30' },
-  { cover: 'capas/livro31.png', pdf: 'livros/livro31.pdf', title: 'Livro 31' },
-  { cover: 'capas/livro32.png', pdf: 'livros/livro32.pdf', title: 'Livro 32' },
-  { cover: 'capas/livro33.png', pdf: 'livros/livro33.pdf', title: 'Livro 33' },
-  { cover: 'capas/livro34.png', pdf: 'livros/livro34.pdf', title: 'Livro 34' },
-  { cover: 'capas/livro35.png', pdf: 'livros/livro35.pdf', title: 'Livro 35' },
-  { cover: 'capas/livro36.png', pdf: 'livros/livro36.pdf', title: 'Livro 36' },
-  { cover: 'capas/livro37.png', pdf: 'livros/livro37.pdf', title: 'Livro 37' },
-  { cover: 'capas/livro38.png', pdf: 'livros/livro38.pdf', title: 'Livro 38' },
-  { cover: 'capas/livro39.png', pdf: 'livros/livro39.pdf', title: 'Livro 39' },
-  { cover: 'capas/livro40.png', pdf: 'livros/livro40.pdf', title: 'Livro 40' },
-  { cover: 'capas/livro41.png', pdf: 'livros/livro41.pdf', title: 'Livro 41' },
-  { cover: 'capas/livro42.png', pdf: 'livros/livro42.pdf', title: 'Livro 42' },
-  { cover: 'capas/livro43.png', pdf: 'livros/livro43.pdf', title: 'Livro 43' },
-  { cover: 'capas/livro44.png', pdf: 'livros/livro44.pdf', title: 'Livro 44' },
-  { cover: 'capas/livro45.png', pdf: 'livros/livro45.pdf', title: 'Livro 45' },
-  { cover: 'capas/livro46.png', pdf: 'livros/livro46.pdf', title: 'Livro 46' },
-  { cover: 'capas/livro47.png', pdf: 'livros/livro47.pdf', title: 'Livro 47' },
-  { cover: 'capas/livro48.png', pdf: 'livros/livro48.pdf', title: 'Livro 48' },
-  { cover: 'capas/livro49.png', pdf: 'livros/livro49.pdf', title: 'Livro 49' },
-  { cover: 'capas/livro50.png', pdf: 'livros/livro50.pdf', title: 'Livro 50' },
-  { cover: 'capas/livro51.png', pdf: 'livros/livro51.pdf', title: 'Livro 51' },
-  { cover: 'capas/livro52.png', pdf: 'livros/livro52.pdf', title: 'Livro 52' },
-  { cover: 'capas/livro53.png', pdf: 'livros/livro53.pdf', title: 'Livro 53' },
-  { cover: 'capas/livro54.png', pdf: 'livros/livro54.pdf', title: 'Livro 54' },
-  { cover: 'capas/livro55.png', pdf: 'livros/livro55.pdf', title: 'Livro 55' },
-  { cover: 'capas/livro56.png', pdf: 'livros/livro56.pdf', title: 'Livro 56' },
-  { cover: 'capas/livro57.png', pdf: 'livros/livro57.pdf', title: 'Livro 57' },
-  { cover: 'capas/livro58.png', pdf: 'livros/livro58.pdf', title: 'Livro 58' },
-  { cover: 'capas/livro59.png', pdf: 'livros/livro59.pdf', title: 'Livro 59' },
-  { cover: 'capas/livro60.png', pdf: 'livros/livro60.pdf', title: 'Livro 60' },
-  { cover: 'capas/livro61.png', pdf: 'livros/livro61.pdf', title: 'Livro 61' },
-  { cover: 'capas/livro62.png', pdf: 'livros/livro62.pdf', title: 'Livro 62' },
-  { cover: 'capas/livro63.png', pdf: 'livros/livro63.pdf', title: 'Livro 63' },
-  { cover: 'capas/livro64.png', pdf: 'livros/livro64.pdf', title: 'Livro 64' },
-  { cover: 'capas/livro65.png', pdf: 'livros/livro65.pdf', title: 'Livro 65' },
-  { cover: 'capas/livro66.png', pdf: 'livros/livro66.pdf', title: 'Livro 66' },
-  { cover: 'capas/livro67.png', pdf: 'livros/livro67.pdf', title: 'Livro 67' },
-  { cover: 'capas/livro68.png', pdf: 'livros/livro68.pdf', title: 'Livro 68' },
-  { cover: 'capas/livro69.png', pdf: 'livros/livro69.pdf', title: 'Livro 69' },
-  { cover: 'capas/livro70.png', pdf: 'livros/livro70.pdf', title: 'Livro 70' },
-  { cover: 'capas/livro71.png', pdf: 'livros/livro71.pdf', title: 'Livro 71' },
-  { cover: 'capas/livro72.png', pdf: 'livros/livro72.pdf', title: 'Livro 72' },
-  { cover: 'capas/livro73.png', pdf: 'livros/livro73.pdf', title: 'Livro 73' },
-  { cover: 'capas/livro74.png', pdf: 'livros/livro74.pdf', title: 'Livro 74' },
-  { cover: 'capas/livro75.png', pdf: 'livros/livro75.pdf', title: 'Livro 75' },
-  { cover: 'capas/livro76.png', pdf: 'livros/livro76.pdf', title: 'Livro 76' },
-  { cover: 'capas/livro77.png', pdf: 'livros/livro77.pdf', title: 'Livro 77' },
-  { cover: 'capas/livro78.png', pdf: 'livros/livro78.pdf', title: 'Livro 78' },
-  { cover: 'capas/livro79.png', pdf: 'livros/livro79.pdf', title: 'Livro 79' },
-  { cover: 'capas/livro80.png', pdf: 'livros/livro80.pdf', title: 'Livro 80' },
-  { cover: 'capas/livro81.png', pdf: 'livros/livro81.pdf', title: 'Livro 81' },
-  { cover: 'capas/livro82.png', pdf: 'livros/livro82.pdf', title: 'Livro 82' },
-  { cover: 'capas/livro83.png', pdf: 'livros/livro83.pdf', title: 'Livro 83' },
-  { cover: 'capas/livro84.png', pdf: 'livros/livro84.pdf', title: 'Livro 84' },
-  { cover: 'capas/livro85.png', pdf: 'livros/livro85.pdf', title: 'Livro 85' },
-  { cover: 'capas/livro86.png', pdf: 'livros/livro86.pdf', title: 'Livro 86' },
-  { cover: 'capas/livro87.png', pdf: 'livros/livro87.pdf', title: 'Livro 87' },
-  { cover: 'capas/livro88.png', pdf: 'livros/livro88.pdf', title: 'Livro 88' },
-  { cover: 'capas/livro89.png', pdf: 'livros/livro89.pdf', title: 'Livro 89' },
-  { cover: 'capas/livro90.png', pdf: 'livros/livro90.pdf', title: 'Livro 90' },
-  { cover: 'capas/livro91.png', pdf: 'livros/livro91.pdf', title: 'Livro 91' },
-  { cover: 'capas/livro92.png', pdf: 'livros/livro92.pdf', title: 'Livro 92' },
-  { cover: 'capas/livro93.png', pdf: 'livros/livro93.pdf', title: 'Livro 93' },
-  { cover: 'capas/livro94.png', pdf: 'livros/livro94.pdf', title: 'Livro 94' },
-  { cover: 'capas/livro95.png', pdf: 'livros/livro95.pdf', title: 'Livro 95' },
-  { cover: 'capas/livro96.png', pdf: 'livros/livro96.pdf', title: 'Livro 96' },
-  { cover: 'capas/livro97.png', pdf: 'livros/livro97.pdf', title: 'Livro 97' },
-  { cover: 'capas/livro98.png', pdf: 'livros/livro98.pdf', title: 'Livro 98' },
-  { cover: 'capas/livro99.png', pdf: 'livros/livro99.pdf', title: 'Livro 99' },
-  { cover: 'capas/livro100.png', pdf: 'livros/livro100.pdf', title: 'Livro 100' },
-  { cover: 'capas/livro101.png', pdf: 'livros/livro101.pdf', title: 'Livro 101' },
-  { cover: 'capas/livro102.png', pdf: 'livros/livro102.pdf', title: 'Livro 102' },
-  { cover: 'capas/livro103.png', pdf: 'livros/livro103.pdf', title: 'Livro 103' },
-  { cover: 'capas/livro104.png', pdf: 'livros/livro104.pdf', title: 'Livro 104' },
-  { cover: 'capas/livro105.png', pdf: 'livros/livro105.pdf', title: 'Livro 105' },
-  { cover: 'capas/livro106.png', pdf: 'livros/livro106.pdf', title: 'Livro 106' },
-  { cover: 'capas/livro107.png', pdf: 'livros/livro107.pdf', title: 'Livro 107' },
-  { cover: 'capas/livro108.png', pdf: 'livros/livro108.pdf', title: 'Livro 108' },
-  { cover: 'capas/livro109.png', pdf: 'livros/livro109.pdf', title: 'Livro 109' },
-  { cover: 'capas/livro110.png', pdf: 'livros/livro110.pdf', title: 'Livro 110' },
-  { cover: 'capas/livro111.png', pdf: 'livros/livro111.pdf', title: 'Livro 111' },
-  { cover: 'capas/livro112.png', pdf: 'livros/livro112.pdf', title: 'Livro 112' },
-  { cover: 'capas/livro113.png', pdf: 'livros/livro113.pdf', title: 'Livro 113' },
-  { cover: 'capas/livro114.png', pdf: 'livros/livro114.pdf', title: 'Livro 114' },
-  { cover: 'capas/livro115.png', pdf: 'livros/livro115.pdf', title: 'Livro 115' },
-  { cover: 'capas/livro116.png', pdf: 'livros/livro116.pdf', title: 'Livro 116' },
-  { cover: 'capas/livro117.png', pdf: 'livros/livro117.pdf', title: 'Livro 117' },
-  { cover: 'capas/livro118.png', pdf: 'livros/livro118.pdf', title: 'Livro 118' },
-  { cover: 'capas/livro119.png', pdf: 'livros/livro119.pdf', title: 'Livro 119' },
-  { cover: 'capas/livro120.png', pdf: 'livros/livro120.pdf', title: 'Livro 120' },
-  { cover: 'capas/livro121.png', pdf: 'livros/livro121.pdf', title: 'Livro 121' },
-  { cover: 'capas/livro122.png', pdf: 'livros/livro122.pdf', title: 'Livro 122' },
-  { cover: 'capas/livro123.png', pdf: 'livros/livro123.pdf', title: 'Livro 123' },
-  { cover: 'capas/livro124.png', pdf: 'livros/livro124.pdf', title: 'Livro 124' },
-  { cover: 'capas/livro125.png', pdf: 'livros/livro125.pdf', title: 'Livro 125' },
-  { cover: 'capas/livro126.png', pdf: 'livros/livro126.pdf', title: 'Livro 126' },
-  { cover: 'capas/livro127.png', pdf: 'livros/livro127.pdf', title: 'Livro 127' },
-  { cover: 'capas/livro128.png', pdf: 'livros/livro128.pdf', title: 'Livro 128' },
-  { cover: 'capas/livro129.png', pdf: 'livros/livro129.pdf', title: 'Livro 129' },
-  { cover: 'capas/livro130.png', pdf: 'livros/livro130.pdf', title: 'Livro 130' },
-  { cover: 'capas/livro131.png', pdf: 'livros/livro131.pdf', title: 'Livro 131' },
-  { cover: 'capas/livro132.png', pdf: 'livros/livro132.pdf', title: 'Livro 132' },
-  { cover: 'capas/livro133.png', pdf: 'livros/livro133.pdf', title: 'Livro 133' },
-  { cover: 'capas/livro134.png', pdf: 'livros/livro134.pdf', title: 'Livro 134' },
-  { cover: 'capas/livro135.png', pdf: 'livros/livro135.pdf', title: 'Livro 135' },
-  { cover: 'capas/livro136.png', pdf: 'livros/livro136.pdf', title: 'Livro 136' },
-  { cover: 'capas/livro137.png', pdf: 'livros/livro137.pdf', title: 'Livro 137' },
-  { cover: 'capas/livro138.png', pdf: 'livros/livro138.pdf', title: 'Livro 138' },
-  { cover: 'capas/livro139.png', pdf: 'livros/livro139.pdf', title: 'Livro 139' },
-  { cover: 'capas/livro140.png', pdf: 'livros/livro140.pdf', title: 'Livro 140' },
-  { cover: 'capas/livro141.png', pdf: 'livros/livro141.pdf', title: 'Livro 141' },
-  { cover: 'capas/livro142.png', pdf: 'livros/livro142.pdf', title: 'Livro 142' },
-  { cover: 'capas/livro143.png', pdf: 'livros/livro143.pdf', title: 'Livro 143' },
-  { cover: 'capas/livro144.png', pdf: 'livros/livro144.pdf', title: 'Livro 144' },
-  { cover: 'capas/livro145.png', pdf: 'livros/livro145.pdf', title: 'Livro 145' },
-  { cover: 'capas/livro146.png', pdf: 'livros/livro146.pdf', title: 'Livro 146' },
-  { cover: 'capas/livro147.png', pdf: 'livros/livro147.pdf', title: 'Livro 147' },
-  { cover: 'capas/livro148.png', pdf: 'livros/livro148.pdf', title: 'Livro 148' },
-  { cover: 'capas/livro149.png', pdf: 'livros/livro149.pdf', title: 'Livro 149' },
-  { cover: 'capas/livro150.png', pdf: 'livros/livro150.pdf', title: 'Livro 150' },
-  { cover: 'capas/livro151.png', pdf: 'livros/livro151.pdf', title: 'Livro 151' },
-  { cover: 'capas/livro152.png', pdf: 'livros/livro152.pdf', title: 'Livro 152' },
-  { cover: 'capas/livro153.png', pdf: 'livros/livro153.pdf', title: 'Livro 153' },
-  { cover: 'capas/livro154.png', pdf: 'livros/livro154.pdf', title: 'Livro 154' },
-  { cover: 'capas/livro155.png', pdf: 'livros/livro155.pdf', title: 'Livro 155' },
-  { cover: 'capas/livro156.png', pdf: 'livros/livro156.pdf', title: 'Livro 156' },
-  { cover: 'capas/livro157.png', pdf: 'livros/livro157.pdf', title: 'Livro 157' },
-  { cover: 'capas/livro158.png', pdf: 'livros/livro158.pdf', title: 'Livro 158' },
-  { cover: 'capas/livro159.png', pdf: 'livros/livro159.pdf', title: 'Livro 159' },
-  { cover: 'capas/livro160.png', pdf: 'livros/livro160.pdf', title: 'Livro 160' },
-  { cover: 'capas/livro161.png', pdf: 'livros/livro161.pdf', title: 'Livro 161' },
-  { cover: 'capas/livro162.png', pdf: 'livros/livro162.pdf', title: 'Livro 162' },
-  { cover: 'capas/livro163.png', pdf: 'livros/livro163.pdf', title: 'Livro 163' },
-  { cover: 'capas/livro164.png', pdf: 'livros/livro164.pdf', title: 'Livro 164' },
-  { cover: 'capas/livro165.png', pdf: 'livros/livro165.pdf', title: 'Livro 165' },
-  { cover: 'capas/livro166.png', pdf: 'livros/livro166.pdf', title: 'Livro 166' },
-  { cover: 'capas/livro167.png', pdf: 'livros/livro167.pdf', title: 'Livro 167' },
-  { cover: 'capas/livro168.png', pdf: 'livros/livro168.pdf', title: 'Livro 168' },
-  { cover: 'capas/livro169.png', pdf: 'livros/livro169.pdf', title: 'Livro 169' },
-  { cover: 'capas/livro170.png', pdf: 'livros/livro170.pdf', title: 'Livro 170' },
-  { cover: 'capas/livro171.png', pdf: 'livros/livro171.pdf', title: 'Livro 171' },
-  { cover: 'capas/livro172.png', pdf: 'livros/livro172.pdf', title: 'Livro 172' },
-  { cover: 'capas/livro173.png', pdf: 'livros/livro173.pdf', title: 'Livro 173' },
-  { cover: 'capas/livro174.png', pdf: 'livros/livro174.pdf', title: 'Livro 174' },
-  { cover: 'capas/livro175.png', pdf: 'livros/livro175.pdf', title: 'Livro 175' },
-  { cover: 'capas/livro176.png', pdf: 'livros/livro176.pdf', title: 'Livro 176' },
-  { cover: 'capas/livro177.png', pdf: 'livros/livro177.pdf', title: 'Livro 177' },
-  { cover: 'capas/livro178.png', pdf: 'livros/livro178.pdf', title: 'Livro 178' },
-  { cover: 'capas/livro179.png', pdf: 'livros/livro179.pdf', title: 'Livro 179' },
-  { cover: 'capas/livro180.png', pdf: 'livros/livro180.pdf', title: 'Livro 180' },
-  { cover: 'capas/livro181.png', pdf: 'livros/livro181.pdf', title: 'Livro 181' },
-  { cover: 'capas/livro182.png', pdf: 'livros/livro182.pdf', title: 'Livro 182' },
-  { cover: 'capas/livro183.png', pdf: 'livros/livro183.pdf', title: 'Livro 183' },
-  { cover: 'capas/livro184.png', pdf: 'livros/livro184.pdf', title: 'Livro 184' },
-  { cover: 'capas/livro185.png', pdf: 'livros/livro185.pdf', title: 'Livro 185' },
-  { cover: 'capas/livro186.png', pdf: 'livros/livro186.pdf', title: 'Livro 186' },
-  { cover: 'capas/livro187.png', pdf: 'livros/livro187.pdf', title: 'Livro 187' },
-  { cover: 'capas/livro188.png', pdf: 'livros/livro188.pdf', title: 'Livro 188' },
-  { cover: 'capas/livro189.png', pdf: 'livros/livro189.pdf', title: 'Livro 189' },
-  { cover: 'capas/livro190.png', pdf: 'livros/livro190.pdf', title: 'Livro 190' },
-  { cover: 'capas/livro191.png', pdf: 'livros/livro191.pdf', title: 'Livro 191' },
-  { cover: 'capas/livro192.png', pdf: 'livros/livro192.pdf', title: 'Livro 192' },
-  { cover: 'capas/livro193.png', pdf: 'livros/livro193.pdf', title: 'Livro 193' },
-  { cover: 'capas/livro194.png', pdf: 'livros/livro194.pdf', title: 'Livro 194' },
-  { cover: 'capas/livro195.png', pdf: 'livros/livro195.pdf', title: 'Livro 195' },
-  { cover: 'capas/livro196.png', pdf: 'livros/livro196.pdf', title: 'Livro 196' },
-  { cover: 'capas/livro197.png', pdf: 'livros/livro197.pdf', title: 'Livro 197' },
-  { cover: 'capas/livro198.png', pdf: 'livros/livro198.pdf', title: 'Livro 198' },
-  { cover: 'capas/livro199.png', pdf: 'livros/livro199.pdf', title: 'Livro 199' },
-  { cover: 'capas/livro200.png', pdf: 'livros/livro200.pdf', title: 'Livro 200' },
-  { cover: 'capas/livro201.png', pdf: 'livros/livro201.pdf', title: 'Livro 201' },
-  { cover: 'capas/livro202.png', pdf: 'livros/livro202.pdf', title: 'Livro 202' },
-  { cover: 'capas/livro203.png', pdf: 'livros/livro203.pdf', title: 'Livro 203' },
-  { cover: 'capas/livro204.png', pdf: 'livros/livro204.pdf', title: 'Livro 204' },
-  { cover: 'capas/livro205.png', pdf: 'livros/livro205.pdf', title: 'Livro 205' },
-  { cover: 'capas/livro206.png', pdf: 'livros/livro206.pdf', title: 'Livro 206' },
-  { cover: 'capas/livro207.png', pdf: 'livros/livro207.pdf', title: 'Livro 207' },
-  { cover: 'capas/livro208.png', pdf: 'livros/livro208.pdf', title: 'Livro 208' },
-  { cover: 'capas/livro209.png', pdf: 'livros/livro209.pdf', title: 'Livro 209' },
-  { cover: 'capas/livro210.png', pdf: 'livros/livro210.pdf', title: 'Livro 210' },
-  { cover: 'capas/livro211.png', pdf: 'livros/livro211.pdf', title: 'Livro 211' },
-  { cover: 'capas/livro212.png', pdf: 'livros/livro212.pdf', title: 'Livro 212' },
-  { cover: 'capas/livro213.png', pdf: 'livros/livro213.pdf', title: 'Livro 213' },
-  { cover: 'capas/livro214.png', pdf: 'livros/livro214.pdf', title: 'Livro 214' },
-  { cover: 'capas/livro215.png', pdf: 'livros/livro215.pdf', title: 'Livro 215' },
-  { cover: 'capas/livro216.png', pdf: 'livros/livro216.pdf', title: 'Livro 216' },
-  { cover: 'capas/livro217.png', pdf: 'livros/livro217.pdf', title: 'Livro 217' },
-  { cover: 'capas/livro218.png', pdf: 'livros/livro218.pdf', title: 'Livro 218' },
-  { cover: 'capas/livro219.png', pdf: 'livros/livro219.pdf', title: 'Livro 219' },
-  { cover: 'capas/livro220.png', pdf: 'livros/livro220.pdf', title: 'Livro 220' },
-  { cover: 'capas/livro221.png', pdf: 'livros/livro221.pdf', title: 'Livro 221' },
-  { cover: 'capas/livro222.png', pdf: 'livros/livro222.pdf', title: 'Livro 222' },
-  { cover: 'capas/livro223.png', pdf: 'livros/livro223.pdf', title: 'Livro 223' },
-  { cover: 'capas/livro224.png', pdf: 'livros/livro224.pdf', title: 'Livro 224' },
-  { cover: 'capas/livro225.png', pdf: 'livros/livro225.pdf', title: 'Livro 225' },
-  { cover: 'capas/livro226.png', pdf: 'livros/livro226.pdf', title: 'Livro 226' },
-  { cover: 'capas/livro227.png', pdf: 'livros/livro227.pdf', title: 'Livro 227' },
-  { cover: 'capas/livro228.png', pdf: 'livros/livro228.pdf', title: 'Livro 228' },
-  { cover: 'capas/livro229.png', pdf: 'livros/livro229.pdf', title: 'Livro 229' },
-  { cover: 'capas/livro230.png', pdf: 'livros/livro230.pdf', title: 'Livro 230' },
-  { cover: 'capas/livro231.png', pdf: 'livros/livro231.pdf', title: 'Livro 231' },
-  { cover: 'capas/livro232.png', pdf: 'livros/livro232.pdf', title: 'Livro 232' },
-  { cover: 'capas/livro233.png', pdf: 'livros/livro233.pdf', title: 'Livro 233' },
-  { cover: 'capas/livro234.png', pdf: 'livros/livro234.pdf', title: 'Livro 234' },
-  { cover: 'capas/livro235.png', pdf: 'livros/livro235.pdf', title: 'Livro 235' },
-  { cover: 'capas/livro236.png', pdf: 'livros/livro236.pdf', title: 'Livro 236' },
-  { cover: 'capas/livro237.png', pdf: 'livros/livro237.pdf', title: 'Livro 237' },
-  { cover: 'capas/livro238.png', pdf: 'livros/livro238.pdf', title: 'Livro 238' },
-  { cover: 'capas/livro239.png', pdf: 'livros/livro239.pdf', title: 'Livro 239' },
-  { cover: 'capas/livro240.png', pdf: 'livros/livro240.pdf', title: 'Livro 240' },
-  { cover: 'capas/livro241.png', pdf: 'livros/livro241.pdf', title: 'Livro 241' },
-  { cover: 'capas/livro242.png', pdf: 'livros/livro242.pdf', title: 'Livro 242' },
-  { cover: 'capas/livro243.png', pdf: 'livros/livro243.pdf', title: 'Livro 243' },
-  { cover: 'capas/livro244.png', pdf: 'livros/livro244.pdf', title: 'Livro 244' },
-  { cover: 'capas/livro245.png', pdf: 'livros/livro245.pdf', title: 'Livro 245' },
-  { cover: 'capas/livro246.png', pdf: 'livros/livro246.pdf', title: 'Livro 246' },
-  { cover: 'capas/livro247.png', pdf: 'livros/livro247.pdf', title: 'Livro 247' },
-  { cover: 'capas/livro248.png', pdf: 'livros/livro248.pdf', title: 'Livro 248' },
-  { cover: 'capas/livro249.png', pdf: 'livros/livro249.pdf', title: 'Livro 249' },
-  { cover: 'capas/livro250.png', pdf: 'livros/livro250.pdf', title: 'Livro 250' },
-  { cover: 'capas/livro251.png', pdf: 'livros/livro251.pdf', title: 'Livro 251' },
-  { cover: 'capas/livro252.png', pdf: 'livros/livro252.pdf', title: 'Livro 252' },
-  { cover: 'capas/livro253.png', pdf: 'livros/livro253.pdf', title: 'Livro 253' },
-  { cover: 'capas/livro254.png', pdf: 'livros/livro254.pdf', title: 'Livro 254' },
-  { cover: 'capas/livro255.png', pdf: 'livros/livro255.pdf', title: 'Livro 255' },
-  { cover: 'capas/livro256.png', pdf: 'livros/livro256.pdf', title: 'Livro 256' },
-  { cover: 'capas/livro257.png', pdf: 'livros/livro257.pdf', title: 'Livro 257' },
-  { cover: 'capas/livro258.png', pdf: 'livros/livro258.pdf', title: 'Livro 258' },
-  { cover: 'capas/livro259.png', pdf: 'livros/livro259.pdf', title: 'Livro 259' },
-  { cover: 'capas/livro260.png', pdf: 'livros/livro260.pdf', title: 'Livro 260' },
-  { cover: 'capas/livro261.png', pdf: 'livros/livro261.pdf', title: 'Livro 261' },
-  { cover: 'capas/livro262.png', pdf: 'livros/livro262.pdf', title: 'Livro 262' },
-  { cover: 'capas/livro263.png', pdf: 'livros/livro263.pdf', title: 'Livro 263' },
-  { cover: 'capas/livro264.png', pdf: 'livros/livro264.pdf', title: 'Livro 264' },
-  { cover: 'capas/livro265.png', pdf: 'livros/livro265.pdf', title: 'Livro 265' },
-  { cover: 'capas/livro266.png', pdf: 'livros/livro266.pdf', title: 'Livro 266' },
-  { cover: 'capas/livro267.png', pdf: 'livros/livro267.pdf', title: 'Livro 267' },
-  { cover: 'capas/livro268.png', pdf: 'livros/livro268.pdf', title: 'Livro 268' },
-  { cover: 'capas/livro269.png', pdf: 'livros/livro269.pdf', title: 'Livro 269' },
-  { cover: 'capas/livro270.png', pdf: 'livros/livro270.pdf', title: 'Livro 270' },
-  { cover: 'capas/livro271.png', pdf: 'livros/livro271.pdf', title: 'Livro 271' },
-  { cover: 'capas/livro272.png', pdf: 'livros/livro272.pdf', title: 'Livro 272' },
-  { cover: 'capas/livro273.png', pdf: 'livros/livro273.pdf', title: 'Livro 273' },
-  { cover: 'capas/livro274.png', pdf: 'livros/livro274.pdf', title: 'Livro 274' },
-  { cover: 'capas/livro275.png', pdf: 'livros/livro275.pdf', title: 'Livro 275' },
-  { cover: 'capas/livro276.png', pdf: 'livros/livro276.pdf', title: 'Livro 276' },
-  { cover: 'capas/livro277.png', pdf: 'livros/livro277.pdf', title: 'Livro 277' },
-  { cover: 'capas/livro278.png', pdf: 'livros/livro278.pdf', title: 'Livro 278' },
-  { cover: 'capas/livro279.png', pdf: 'livros/livro279.pdf', title: 'Livro 279' },
-  { cover: 'capas/livro280.png', pdf: 'livros/livro280.pdf', title: 'Livro 280' },
-  { cover: 'capas/livro281.png', pdf: 'livros/livro281.pdf', title: 'Livro 281' },
-  { cover: 'capas/livro282.png', pdf: 'livros/livro282.pdf', title: 'Livro 282' },
-  { cover: 'capas/livro283.png', pdf: 'livros/livro283.pdf', title: 'Livro 283' },
-  { cover: 'capas/livro284.png', pdf: 'livros/livro284.pdf', title: 'Livro 284' },
-  { cover: 'capas/livro285.png', pdf: 'livros/livro285.pdf', title: 'Livro 285' },
-  { cover: 'capas/livro286.png', pdf: 'livros/livro286.pdf', title: 'Livro 286' },
-  { cover: 'capas/livro287.png', pdf: 'livros/livro287.pdf', title: 'Livro 287' },
-  { cover: 'capas/livro288.png', pdf: 'livros/livro288.pdf', title: 'Livro 288' },
-  { cover: 'capas/livro289.png', pdf: 'livros/livro289.pdf', title: 'Livro 289' },
-  { cover: 'capas/livro290.png', pdf: 'livros/livro290.pdf', title: 'Livro 290' },
-  { cover: 'capas/livro291.png', pdf: 'livros/livro291.pdf', title: 'Livro 291' },
-  { cover: 'capas/livro292.png', pdf: 'livros/livro292.pdf', title: 'Livro 292' },
-  { cover: 'capas/livro293.png', pdf: 'livros/livro293.pdf', title: 'Livro 293' },
-  { cover: 'capas/livro294.png', pdf: 'livros/livro294.pdf', title: 'Livro 294' },
-  { cover: 'capas/livro295.png', pdf: 'livros/livro295.pdf', title: 'Livro 295' },
-  { cover: 'capas/livro296.png', pdf: 'livros/livro296.pdf', title: 'Livro 296' },
-  { cover: 'capas/livro297.png', pdf: 'livros/livro297.pdf', title: 'Livro 297' },
-  { cover: 'capas/livro298.png', pdf: 'livros/livro298.pdf', title: 'Livro 298' },
-  { cover: 'capas/livro299.png', pdf: 'livros/livro299.pdf', title: 'Livro 299' },
-  { cover: 'capas/livro300.png', pdf: 'livros/livro300.pdf', title: 'Livro 300' },
-  { cover: 'capas/livro301.png', pdf: 'livros/livro301.pdf', title: 'Livro 301' },
-  { cover: 'capas/livro302.png', pdf: 'livros/livro302.pdf', title: 'Livro 302' },
-  { cover: 'capas/livro303.png', pdf: 'livros/livro303.pdf', title: 'Livro 303' },
-  { cover: 'capas/livro304.png', pdf: 'livros/livro304.pdf', title: 'Livro 304' },
-  { cover: 'capas/livro305.png', pdf: 'livros/livro305.pdf', title: 'Livro 305' },
-  { cover: 'capas/livro306.png', pdf: 'livros/livro306.pdf', title: 'Livro 306' },
-  { cover: 'capas/livro307.png', pdf: 'livros/livro307.pdf', title: 'Livro 307' },
-  { cover: 'capas/livro308.png', pdf: 'livros/livro308.pdf', title: 'Livro 308' },
-  { cover: 'capas/livro309.png', pdf: 'livros/livro309.pdf', title: 'Livro 309' },
-  { cover: 'capas/livro310.png', pdf: 'livros/livro310.pdf', title: 'Livro 310' },
-  { cover: 'capas/livro311.png', pdf: 'livros/livro311.pdf', title: 'Livro 311' },
-  { cover: 'capas/livro312.png', pdf: 'livros/livro312.pdf', title: 'Livro 312' },
-  { cover: 'capas/livro313.png', pdf: 'livros/livro313.pdf', title: 'Livro 313' },
-  { cover: 'capas/livro314.png', pdf: 'livros/livro314.pdf', title: 'Livro 314' },
-  { cover: 'capas/livro315.png', pdf: 'livros/livro315.pdf', title: 'Livro 315' },
-  { cover: 'capas/livro316.png', pdf: 'livros/livro316.pdf', title: 'Livro 316' },
-  { cover: 'capas/livro317.png', pdf: 'livros/livro317.pdf', title: 'Livro 317' },
-  { cover: 'capas/livro318.png', pdf: 'livros/livro318.pdf', title: 'Livro 318' },
-  { cover: 'capas/livro319.png', pdf: 'livros/livro319.pdf', title: 'Livro 319' },
-  { cover: 'capas/livro320.png', pdf: 'livros/livro320.pdf', title: 'Livro 320' },
-  { cover: 'capas/livro321.png', pdf: 'livros/livro321.pdf', title: 'Livro 321' },
-  { cover: 'capas/livro322.png', pdf: 'livros/livro322.pdf', title: 'Livro 322' },
-  { cover: 'capas/livro323.png', pdf: 'livros/livro323.pdf', title: 'Livro 323' },
-  { cover: 'capas/livro324.png', pdf: 'livros/livro324.pdf', title: 'Livro 324' },
-  { cover: 'capas/livro325.png', pdf: 'livros/livro325.pdf', title: 'Livro 325' },
-  { cover: 'capas/livro326.png', pdf: 'livros/livro326.pdf', title: 'Livro 326' },
-  { cover: 'capas/livro327.png', pdf: 'livros/livro327.pdf', title: 'Livro 327' },
-  { cover: 'capas/livro328.png', pdf: 'livros/livro328.pdf', title: 'Livro 328' },
-  { cover: 'capas/livro329.png', pdf: 'livros/livro329.pdf', title: 'Livro 329' },
-  { cover: 'capas/livro330.png', pdf: 'livros/livro330.pdf', title: 'Livro 330' },
-  { cover: 'capas/livro331.png', pdf: 'livros/livro331.pdf', title: 'Livro 331' },
-  { cover: 'capas/livro332.png', pdf: 'livros/livro332.pdf', title: 'Livro 332' },
-  { cover: 'capas/livro333.png', pdf: 'livros/livro333.pdf', title: 'Livro 333' },
-  { cover: 'capas/livro334.png', pdf: 'livros/livro334.pdf', title: 'Livro 334' },
-  { cover: 'capas/livro335.png', pdf: 'livros/livro335.pdf', title: 'Livro 335' },
-  { cover: 'capas/livro336.png', pdf: 'livros/livro336.pdf', title: 'Livro 336' },
-  { cover: 'capas/livro337.png', pdf: 'livros/livro337.pdf', title: 'Livro 337' },
-  { cover: 'capas/livro338.png', pdf: 'livros/livro338.pdf', title: 'Livro 338' },
-  { cover: 'capas/livro339.png', pdf: 'livros/livro339.pdf', title: 'Livro 339' },
-  { cover: 'capas/livro340.png', pdf: 'livros/livro340.pdf', title: 'Livro 340' },
-  { cover: 'capas/livro341.png', pdf: 'livros/livro341.pdf', title: 'Livro 341' },
-  { cover: 'capas/livro342.png', pdf: 'livros/livro342.pdf', title: 'Livro 342' },
-  { cover: 'capas/livro343.png', pdf: 'livros/livro343.pdf', title: 'Livro 343' },
-  { cover: 'capas/livro344.png', pdf: 'livros/livro344.pdf', title: 'Livro 344' },
-  { cover: 'capas/livro345.png', pdf: 'livros/livro345.pdf', title: 'Livro 345' },
-  { cover: 'capas/livro346.png', pdf: 'livros/livro346.pdf', title: 'Livro 346' },
-  { cover: 'capas/livro347.png', pdf: 'livros/livro347.pdf', title: 'Livro 347' },
-  { cover: 'capas/livro348.png', pdf: 'livros/livro348.pdf', title: 'Livro 348' },
-  { cover: 'capas/livro349.png', pdf: 'livros/livro349.pdf', title: 'Livro 349' },
-  { cover: 'capas/livro350.png', pdf: 'livros/livro350.pdf', title: 'Livro 350' },
-  { cover: 'capas/livro351.png', pdf: 'livros/livro351.pdf', title: 'Livro 351' },
-  { cover: 'capas/livro352.png', pdf: 'livros/livro352.pdf', title: 'Livro 352' },
-  { cover: 'capas/livro353.png', pdf: 'livros/livro353.pdf', title: 'Livro 353' },
-  { cover: 'capas/livro354.png', pdf: 'livros/livro354.pdf', title: 'Livro 354' },
-  { cover: 'capas/livro355.png', pdf: 'livros/livro355.pdf', title: 'Livro 355' },
-  { cover: 'capas/livro356.png', pdf: 'livros/livro356.pdf', title: 'Livro 356' },
-  { cover: 'capas/livro357.png', pdf: 'livros/livro357.pdf', title: 'Livro 357' },
-  { cover: 'capas/livro358.png', pdf: 'livros/livro358.pdf', title: 'Livro 358' },
-  { cover: 'capas/livro359.png', pdf: 'livros/livro359.pdf', title: 'Livro 359' },
-  { cover: 'capas/livro360.png', pdf: 'livros/livro360.pdf', title: 'Livro 360' },
-  { cover: 'capas/livro361.png', pdf: 'livros/livro361.pdf', title: 'Livro 361' },
-  { cover: 'capas/livro362.png', pdf: 'livros/livro362.pdf', title: 'Livro 362' },
-  { cover: 'capas/livro363.png', pdf: 'livros/livro363.pdf', title: 'Livro 363' },
-  { cover: 'capas/livro364.png', pdf: 'livros/livro364.pdf', title: 'Livro 364' },
-  { cover: 'capas/livro365.png', pdf: 'livros/livro365.pdf', title: 'Livro 365' },
-  { cover: 'capas/livro366.png', pdf: 'livros/livro366.pdf', title: 'Livro 366' },
-  { cover: 'capas/livro367.png', pdf: 'livros/livro367.pdf', title: 'Livro 367' },
-  { cover: 'capas/livro368.png', pdf: 'livros/livro368.pdf', title: 'Livro 368' },
-  { cover: 'capas/livro369.png', pdf: 'livros/livro369.pdf', title: 'Livro 369' },
-  { cover: 'capas/livro370.png', pdf: 'livros/livro370.pdf', title: 'Livro 370' },
-  { cover: 'capas/livro371.png', pdf: 'livros/livro371.pdf', title: 'Livro 371' },
-  { cover: 'capas/livro372.png', pdf: 'livros/livro372.pdf', title: 'Livro 372' },
-  { cover: 'capas/livro373.png', pdf: 'livros/livro373.pdf', title: 'Livro 373' },
-  { cover: 'capas/livro374.png', pdf: 'livros/livro374.pdf', title: 'Livro 374' },
-  { cover: 'capas/livro375.png', pdf: 'livros/livro375.pdf', title: 'Livro 375' },
-  { cover: 'capas/livro376.png', pdf: 'livros/livro376.pdf', title: 'Livro 376' },
-  { cover: 'capas/livro377.png', pdf: 'livros/livro377.pdf', title: 'Livro 377' },
-  { cover: 'capas/livro378.png', pdf: 'livros/livro378.pdf', title: 'Livro 378' },
-  { cover: 'capas/livro379.png', pdf: 'livros/livro379.pdf', title: 'Livro 379' },
-  { cover: 'capas/livro380.png', pdf: 'livros/livro380.pdf', title: 'Livro 380' },
-  { cover: 'capas/livro381.png', pdf: 'livros/livro381.pdf', title: 'Livro 381' },
-  { cover: 'capas/livro382.png', pdf: 'livros/livro382.pdf', title: 'Livro 382' },
-  { cover: 'capas/livro383.png', pdf: 'livros/livro383.pdf', title: 'Livro 383' },
-  { cover: 'capas/livro384.png', pdf: 'livros/livro384.pdf', title: 'Livro 384' },
-  { cover: 'capas/livro385.png', pdf: 'livros/livro385.pdf', title: 'Livro 385' },
-  { cover: 'capas/livro386.png', pdf: 'livros/livro386.pdf', title: 'Livro 386' },
-  { cover: 'capas/livro387.png', pdf: 'livros/livro387.pdf', title: 'Livro 387' },
-  { cover: 'capas/livro388.png', pdf: 'livros/livro388.pdf', title: 'Livro 388' },
-  { cover: 'capas/livro389.png', pdf: 'livros/livro389.pdf', title: 'Livro 389' },
-  { cover: 'capas/livro390.png', pdf: 'livros/livro390.pdf', title: 'Livro 390' },
-  { cover: 'capas/livro391.png', pdf: 'livros/livro391.pdf', title: 'Livro 391' },
-  { cover: 'capas/livro392.png', pdf: 'livros/livro392.pdf', title: 'Livro 392' },
-  { cover: 'capas/livro393.png', pdf: 'livros/livro393.pdf', title: 'Livro 393' },
-  { cover: 'capas/livro394.png', pdf: 'livros/livro394.pdf', title: 'Livro 394' },
-  { cover: 'capas/livro395.png', pdf: 'livros/livro395.pdf', title: 'Livro 395' },
-  { cover: 'capas/livro396.png', pdf: 'livros/livro396.pdf', title: 'Livro 396' },
-  { cover: 'capas/livro397.png', pdf: 'livros/livro397.pdf', title: 'Livro 397' },
-  { cover: 'capas/livro398.png', pdf: 'livros/livro398.pdf', title: 'Livro 398' },
-  { cover: 'capas/livro399.png', pdf: 'livros/livro399.pdf', title: 'Livro 399' },
-  { cover: 'capas/livro400.png', pdf: 'livros/livro400.pdf', title: 'Livro 400' },
-  { cover: 'capas/livro401.png', pdf: 'livros/livro401.pdf', title: 'Livro 401' },
-  { cover: 'capas/livro402.png', pdf: 'livros/livro402.pdf', title: 'Livro 402' },
-  { cover: 'capas/livro403.png', pdf: 'livros/livro403.pdf', title: 'Livro 403' },
-  { cover: 'capas/livro404.png', pdf: 'livros/livro404.pdf', title: 'Livro 404' },
-  { cover: 'capas/livro405.png', pdf: 'livros/livro405.pdf', title: 'Livro 405' },
-  { cover: 'capas/livro406.png', pdf: 'livros/livro406.pdf', title: 'Livro 406' },
-  { cover: 'capas/livro407.png', pdf: 'livros/livro407.pdf', title: 'Livro 407' },
-  { cover: 'capas/livro408.png', pdf: 'livros/livro408.pdf', title: 'Livro 408' },
-  { cover: 'capas/livro409.png', pdf: 'livros/livro409.pdf', title: 'Livro 409' },
-  { cover: 'capas/livro410.png', pdf: 'livros/livro410.pdf', title: 'Livro 410' },
-  { cover: 'capas/livro411.png', pdf: 'livros/livro411.pdf', title: 'Livro 411' },
-  { cover: 'capas/livro412.png', pdf: 'livros/livro412.pdf', title: 'Livro 412' },
-  { cover: 'capas/livro413.png', pdf: 'livros/livro413.pdf', title: 'Livro 413' },
-  { cover: 'capas/livro414.png', pdf: 'livros/livro414.pdf', title: 'Livro 414' },
-  { cover: 'capas/livro415.png', pdf: 'livros/livro415.pdf', title: 'Livro 415' },
-  { cover: 'capas/livro416.png', pdf: 'livros/livro416.pdf', title: 'Livro 416' },
-  { cover: 'capas/livro417.png', pdf: 'livros/livro417.pdf', title: 'Livro 417' },
-  { cover: 'capas/livro418.png', pdf: 'livros/livro418.pdf', title: 'Livro 418' },
-  { cover: 'capas/livro419.png', pdf: 'livros/livro419.pdf', title: 'Livro 419' },
-  { cover: 'capas/livro420.png', pdf: 'livros/livro420.pdf', title: 'Livro 420' },
-  { cover: 'capas/livro421.png', pdf: 'livros/livro421.pdf', title: 'Livro 421' },
-  { cover: 'capas/livro422.png', pdf: 'livros/livro422.pdf', title: 'Livro 422' },
-  { cover: 'capas/livro423.png', pdf: 'livros/livro423.pdf', title: 'Livro 423' },
-  { cover: 'capas/livro424.png', pdf: 'livros/livro424.pdf', title: 'Livro 424' },
-  { cover: 'capas/livro425.png', pdf: 'livros/livro425.pdf', title: 'Livro 425' },
-  { cover: 'capas/livro426.png', pdf: 'livros/livro426.pdf', title: 'Livro 426' },
-  { cover: 'capas/livro427.png', pdf: 'livros/livro427.pdf', title: 'Livro 427' },
-  { cover: 'capas/livro428.png', pdf: 'livros/livro428.pdf', title: 'Livro 428' },
-  { cover: 'capas/livro429.png', pdf: 'livros/livro429.pdf', title: 'Livro 429' },
-  { cover: 'capas/livro430.png', pdf: 'livros/livro430.pdf', title: 'Livro 430' },
-  { cover: 'capas/livro431.png', pdf: 'livros/livro431.pdf', title: 'Livro 431' },
-  { cover: 'capas/livro432.png', pdf: 'livros/livro432.pdf', title: 'Livro 432' },
-  { cover: 'capas/livro433.png', pdf: 'livros/livro433.pdf', title: 'Livro 433' },
-  { cover: 'capas/livro434.png', pdf: 'livros/livro434.pdf', title: 'Livro 434' },
-  { cover: 'capas/livro435.png', pdf: 'livros/livro435.pdf', title: 'Livro 435' },
-  { cover: 'capas/livro436.png', pdf: 'livros/livro436.pdf', title: 'Livro 436' },
-  { cover: 'capas/livro437.png', pdf: 'livros/livro437.pdf', title: 'Livro 437' },
-  { cover: 'capas/livro438.png', pdf: 'livros/livro438.pdf', title: 'Livro 438' },
-  { cover: 'capas/livro439.png', pdf: 'livros/livro439.pdf', title: 'Livro 439' }
-      ];
+      const bookData = [];
       function createBookCovers() {
   const bookCount = Math.min(415, bookData.length);
   for (let i = 0; i < bookCount; i++) {
@@ -2632,40 +2453,56 @@ accretionRings.push({
 }
       }
       createAccretionDisk();
+// === SPIN TORSIONAL POR ANEL (rotação principal persistente) ===
 for (let i = 0; i < accretionRings.length; i++) {
   const ring = accretionRings[i];
+
+  // limites radiais (ajuste se já tem):
   ring.inner = ring.inner ?? ring.radius;
   ring.outer = ring.outer ?? (ring.radius + 0.3);
+
+  // estado de rotação principal (em torno do eixo do anel)
   ring._spin = {
-    phi: 0,
-    omega: 0,
-    appliedPhi: 0,
-    I: 1.0,
-    kT: 0.02,
-    cT: 10.369,
-    c0: 0.002,
-    omegaMin: -8.0,
+    phi: 0,            // ângulo acumulado [rad]
+    omega: 0,          // velocidade angular [rad/s] (semeamos no 1º frame)
+    appliedPhi: 0,     // quanto já foi aplicado no gimbal (para aplicar só delta)
+
+    // parâmetros físicos
+    I: 1.0,            // inércia efetiva do anel
+    kT: 0.02,           // rigidez torsional com vizinhos (propaga ‘peteleco’)
+    cT: 12.6,           // amortecimento relativo entre vizinhos
+    c0: 0.002,          // arrasto global MUITO baixo (quase conserva momento)
+    omegaMin: -8.0,    // limites de segurança para não explodir
     omegaMax:  8.0
   };
 }
 function stepRingSpin(dt) {
   if (!accretionRings?.length) return;
+
+  // torque por anel computado a partir dos vizinhos
   const torque = new Array(accretionRings.length).fill(0);
+
   for (let i = 0; i < accretionRings.length; i++) {
     const p = accretionRings[i]._spin;
     const L = (i > 0) ? accretionRings[i-1]._spin : null;
     const R = (i+1 < accretionRings.length) ? accretionRings[i+1]._spin : null;
+
+    // acoplamento torsional (tende a igualar ângulos e velocidades)
     if (L) {
       torque[i] +=  p.kT * (L.phi   - p.phi) + p.cT * (L.omega - p.omega);
     }
     if (R) {
       torque[i] +=  p.kT * (R.phi   - p.phi) + p.cT * (R.omega - p.omega);
     }
+
+    // arrasto global leve (quase zero -> mantém velocidade)
     torque[i] += -p.c0 * p.omega;
   }
+
+  // integra
   for (let i = 0; i < accretionRings.length; i++) {
     const p = accretionRings[i]._spin;
-    const a = torque[i] / p.I;
+    const a = torque[i] / p.I;          // aceleração angular
     p.omega = Math.max(p.omegaMin, Math.min(p.omegaMax, p.omega + a * dt));
     p.phi   += p.omega * dt;
   }
@@ -2881,6 +2718,9 @@ function updateBlackHoleTrap(deltaTime) {
       }
     }
     if ((now - (m._trappedAt || now)) >= 36_000) {
+  const pos = (m && m.mesh && m.mesh.position) ? m.mesh.position.clone() : null;
+	
+    explodeMeteorAt(pos);
       scene.remove(m.mesh);
       if (m.trailMesh) scene.remove(m.trailMesh);
       miniMeteors.splice(i, 1);
@@ -3587,21 +3427,32 @@ function collideMiniMeteorsAffectRingSpin(dt){
       const toP    = tmpV.copy(p).sub(center);
       const distPlane = toP.dot(normal);
       if (Math.abs(distPlane) > 0.08) continue;
+
+      // ponto projetado no plano do anel e para coords locais (Ring = XY)
       const pProj  = tmpV.copy(p).addScaledVector(normal, -distPlane);
       const pLocal = ring.mesh.worldToLocal(localP.copy(pProj));
       const r2 = pLocal.x*pLocal.x + pLocal.y*pLocal.y;
       const r  = Math.sqrt(r2);
 
       if (r >= ring.inner && r <= ring.outer){
+        // vetor tangente local (XY) e correspondente no mundo
         const tangLocal = new THREE.Vector3(-pLocal.y, pLocal.x, 0).normalize();
         const tangWorld = ring.mesh.localToWorld(tangLocal.clone())
                                  .sub(ring.mesh.getWorldPosition(tmpP.set(0,0,0))).normalize();
+
+        // componente tangencial da velocidade do meteoro
         const vt = v.dot(tangWorld);
+
+        // === torque persistente: dΩ proporcional a vt / r ===
+        // (ganho ajustável; >0 aumenta rotação no sentido da tangente; <0 inverte)
         const GAIN = 0.85;
         const dOmega = (vt / Math.max(0.25, r)) * GAIN;
         addSpinImpulse(ri, dOmega);
+
+        // meteoro perde um pouco do tangencial e é "descolado" do plano
         v.addScaledVector(tangWorld, -vt * 0.10);
         v.addScaledVector(normal,    +0.25);
+
         break;
       }
     }
@@ -3688,14 +3539,20 @@ accretionRings.forEach((ring, index) => {
     const qParent = ring.parentRing.mesh.getWorldQuaternion(_tmpQuat);
     axisWorld = _tmpAxis.copy(Z_AXIS).applyQuaternion(qParent).normalize();
   }
+// ring.gimbal.rotateOnWorldAxis(axisWorld, step)
+// 1) SEMEIA a omega inicial a partir do 'step' original (apenas no 1º frame)
 if (deltaTime > 0 && ring._spin && ring._spin.omega === 0) {
-  ring._spin.omega = step / deltaTime;
+  // 'step' era o incremento angular antigo do seu código
+  ring._spin.omega = step / deltaTime; // mantém velocidade inicial original
 }
+
+// 2) agora aplicamos a rotação a partir de phi acumulado
 const dPhi = ring._spin.phi - ring._spin.appliedPhi;
 if (Math.abs(dPhi) > 1e-8) {
   ring.gimbal.rotateOnWorldAxis(axisWorld, dPhi);
   ring._spin.appliedPhi = ring._spin.phi;
 }
+
           const baseOpacity = 0.3 + (1 - index / accretionRings.length) * 0.5;
           let opacity = baseOpacity + Math.sin(time * 0.5 + index) * 0.1;
           if (isGravityAltered && ring.radius < 8.0) {
@@ -3906,7 +3763,186 @@ if (toggleHelp){
   reset();
 })();
       animate();
+	  
+	  
     </script>
+	
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+/* =====================================================
+   📚 Biblioteca Cósmica - IndexedDB + BookSystem
+   ===================================================== */
+
+const DB_NAME = "LumenLibrary";
+const DB_VERSION = 1;
+const STORE_NAME = "pdfs";
+let db;
+
+// 🔹 Inicializar banco
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onerror = (e) => reject(e);
+    request.onsuccess = (e) => {
+      db = e.target.result;
+      resolve(db);
+    };
+    request.onupgradeneeded = (e) => {
+      db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
+      }
+    };
+  });
+}
+
+// 🔹 Salvar PDF no banco
+function savePdfToDB(name, arrayBuffer, cover) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    const record = { name, data: arrayBuffer, cover, created: Date.now() };
+    const request = store.add(record);
+    request.onsuccess = () => resolve();
+    request.onerror = (e) => reject(e);
+  });
+}
+
+// 🔹 Carregar todos os PDFs do banco
+function loadAllPdfs() {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], "readonly");
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.getAll();
+    request.onsuccess = (e) => resolve(e.target.result);
+    request.onerror = (e) => reject(e);
+  });
+}
+
+// 🔹 Criar capa do PDF
+async function extractPdfCover(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1.2 });
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return canvas.toDataURL("image/jpeg", 0.8);
+}
+
+// 🔹 Criar objeto visual no bookSystem
+async function spawnPdfBook(record) {
+  const loader = new THREE.TextureLoader();
+  const texture = loader.load(record.cover);
+  const spriteMaterial = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0.9,
+    depthTest: true,
+    depthWrite: false,
+    alphaTest: 0.01
+  });
+  const sprite = new THREE.Sprite(spriteMaterial);
+
+  const randomFactor = Math.pow(Math.random(), 0.25);
+  const radius = 4 + randomFactor * 22;
+  const angle = Math.random() * Math.PI * 2;
+  const height = (Math.random() - 0.5) * Math.max(0.08, radius * 0.04);
+  sprite.position.set(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
+  sprite.scale.set(0.5, 0.5, 1);
+  sprite.renderOrder = 1500;
+
+  const bookObject = {
+    sprite: sprite,
+    originalScale: { x: 0.3, y: 0.3 },
+    radius: radius,
+    angle: angle,
+    baseHeight: height,
+    orbitalSpeed: Math.sqrt(15 / radius) / radius * 0.2,
+    pdfRecordId: record.id,
+    title: record.name,
+    isHovered: false,
+    wobbleSpeed: 0.008 + Math.random() * 0.025,
+    phase: Math.random() * Math.PI * 2
+  };
+  bookSystem.books.push(bookObject);
+  scene.add(sprite);
+}
+
+// 🔹 Lê e abre PDF do banco ao clicar
+async function openPdfFromDB(id) {
+  const tx = db.transaction([STORE_NAME], "readonly");
+  const store = tx.objectStore(STORE_NAME);
+  const req = store.get(id);
+  req.onsuccess = (e) => {
+    const record = e.target.result;
+    if (!record) return;
+    const blob = new Blob([record.data], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  };
+}
+
+// 🔹 Adicionar novo PDF arrastado
+async function addPDF(file) {
+  const cover = await extractPdfCover(file);
+  const buffer = await file.arrayBuffer();
+  await savePdfToDB(file.name, buffer, cover);
+  const last = await loadAllPdfs();
+  const newest = last[last.length - 1];
+  await spawnPdfBook(newest);
+}
+
+// 🔹 Drag & Drop
+window.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  document.body.style.background = "rgba(0,255,255,0.05)";
+});
+window.addEventListener("dragleave", (e) => {
+  e.preventDefault();
+  document.body.style.background = "";
+});
+window.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  document.body.style.background = "";
+  for (const file of e.dataTransfer.files) {
+    if (file.type === "application/pdf") await addPDF(file);
+  }
+});
+
+// 🔹 Integra com o clique do bookSystem
+const oldHandleBookClick = handleBookClick;
+handleBookClick = function (event) {
+  if (coversMuted || shouldBlockBookActions()) return;
+  bookSystem.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  bookSystem.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  bookSystem.raycaster.setFromCamera(bookSystem.mouse, camera);
+  const intersects = bookSystem.raycaster.intersectObjects(bookSystem.books.map(b => b.sprite));
+  if (intersects.length > 0) {
+    const clickedBook = bookSystem.books.find(b => b.sprite === intersects[0].object);
+    if (!clickedBook) return;
+    if (selectedBook === clickedBook) {
+      warp.active = false;
+      if (clickedBook.pdfRecordId) openPdfFromDB(clickedBook.pdfRecordId);
+      else window.open(clickedBook.pdf, "_blank");
+    } else {
+      startWarpTo(clickedBook);
+    }
+  }
+};
+
+// 🔹 Inicia banco e carrega livros salvos
+(async () => {
+  await openDatabase();
+  const pdfs = await loadAllPdfs();
+  for (const p of pdfs) await spawnPdfBook(p);
+})();
+</script>
+
+	
   </body>
 </html>
 
