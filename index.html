@@ -203,18 +203,22 @@ a:focus { outline: none; }
     <a href="#" id="reset">Resetar Câmera</a> •
     <a href="#" id="toggle-debug">Debug Mode</a> •
     <a href="#" id="toggle-warp"></a>
-    <a href="#" id="toggle-covers">Desabilitar Livros</a> •
+    <a href="#" id="toggle-covers">Ocultar Livros</a> •
 	<a href="#" id="toggle-licence">Licence</a>
   </div>
 </div>
     <div id="help" style="display:none">
-  <div style="font-weight:600;margin-bottom:6px">Controles rápidos</div>
+  <div style="font-weight:600;margin-bottom:6px">Controles rápidos:</div>
+  <br>
+  • Adicionar livro: Jogue um arquivo .PDF em qualquer lugar da tela e ele fará parte do horizonte de eventos!<br>
+  <br>
   • Mouse: arrastar para orbitar • Rodinha: zoom/warp<br>
   • Duplo clique: Mini meteoros<br>
-  • Botão direito: Acelerar gravidade<br>
-  • Clique direito numa capa: favoritar/desfavoritar<br>
+  <br>
   • Space: acelerar • Shift: ré • WASD: mirar<br>
-  • Desabilitar Livros: oculta capas
+  <br>
+  • Botão direito: Acelerar gravidade<br>
+  • Clique direito no livro: favoritar/desfavoritar<br>
 </div>
 	<div id="debug">
       Distância: <span id="distance">0</span> UA<br>
@@ -224,22 +228,17 @@ a:focus { outline: none; }
       FPS: <span id="fps">0</span>
     </div>
 	<div id="licence">
-  <div class="title">Licence & Direitos de Uso</div>
+  <div class="title">Bem vindo à Blackhole Biblioteqe</div>
   <div>
+  <br>
+	Jogue seus arquivos PDF's em qualquer lugar da tela e eles serão exibidos 
+	no horizonte de eventos do black-hole. Aproveite a vista!<br>
+	<br>
     Este projeto exibe capas e metadados de obras literárias para fins de
     navegação e visualização. Direitos autorais pertencem aos respectivos
     detentores. As imagens e conteúdos exibidos são destinados a uso
     pessoal/educacional dentro desta experiência interativa. 
-    Não distribua nem comercialize os materiais sem autorização dos titulares.<br>
-	<br>
-	Considere adquirir um livro físico para apoiar seu autor.<br>
-<br>
-	SE VOCÊ POSSUI OS DIREITOS INTEGRAIS DE QUALQUER TÍTULO,<br>
-	NOS ENVIE UMA MENSAGEM E IMEDIATAMENTE IREMOS REMOVER <br>
-	O REFERENTE CONTEÚDO DE NOSSA BIBLIOTECA.<br>
-	<br>
-	IF YOU OWN THE FULL RIGHTS TO ANY TITLE, SEND US A MESSAGE <br>
-	AND WE WILL IMMEDIATELY REMOVE THE CONTENT FROM OUR LIBRARY.<br>
+    Não distribua nem comercialize os materiais sem autorização dos titulares.
   </div>
   <a href="#" class="close" id="close-licence">Fechar</a>
 </div>
@@ -809,7 +808,7 @@ document.addEventListener('dblclick', e => e.preventDefault(), { passive:false }
 function setCoversMuted(on) {
   coversMuted = on;
   const a = document.getElementById('toggle-covers');
-  if (a) a.textContent = on ? 'Habilitar Livros' : 'Desabilitar Livros';
+  if (a) a.textContent = on ? 'Habilitar Livros' : 'Ocultar Livros';
 }
 const toggleCoversEl = document.getElementById('toggle-covers');
 if (toggleCoversEl) {
