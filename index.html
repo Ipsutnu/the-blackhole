@@ -3771,7 +3771,8 @@ if (toggleHelp){
 /* =====================================================
    📚 Biblioteca Cósmica - IndexedDB + BookSystem
    ===================================================== */
-
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 const DB_NAME = "LumenLibrary";
 const DB_VERSION = 1;
 const STORE_NAME = "pdfs";
@@ -3907,8 +3908,17 @@ window.addEventListener("dragleave", (e) => {
 window.addEventListener("drop", async (e) => {
   e.preventDefault();
   document.body.style.background = "";
-  for (const file of e.dataTransfer.files) {
-    if (file.type === "application/pdf") await addPDF(file);
+  const pdfs = Array.from(e.dataTransfer.files).filter(f => f.type === "application/pdf");
+  if (pdfs.length === 0) return;
+
+  totalFiles = pdfs.length;
+  loadedFiles = 0;
+  updateProgress();
+
+  for (const file of pdfs) {
+    await addPDF(file);
+    loadedFiles++;
+    updateProgress();
   }
 });
 
@@ -3939,6 +3949,50 @@ handleBookClick = function (event) {
   const pdfs = await loadAllPdfs();
   for (const p of pdfs) await spawnPdfBook(p);
 })();
+
+// =========================
+// 📶 Barra de progresso visual
+// =========================
+
+const progressBar = document.createElement("div");
+progressBar.style.cssText = `
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 4px;
+  width: 0%;
+  background: white;
+  box-shadow: 0 0 10px white;
+  z-index: 9999;
+  transition: width 0.2s ease-out;
+`;
+document.body.appendChild(progressBar);
+
+let totalFiles = 0;
+let loadedFiles = 0;
+
+function resetProgress() {
+  totalFiles = 0;
+  loadedFiles = 0;
+  progressBar.style.width = "0%";
+}
+
+function updateProgress() {
+  if (totalFiles === 0) return;
+  const percent = (loadedFiles / totalFiles) * 100;
+  progressBar.style.width = `${percent}%`;
+  if (percent >= 100) {
+    setTimeout(() => {
+      progressBar.style.transition = "opacity 0.5s ease";
+      progressBar.style.opacity = "0";
+      setTimeout(() => {
+        progressBar.style.width = "0%";
+        progressBar.style.opacity = "1";
+        progressBar.style.transition = "width 0.2s ease-out";
+      }, 500);
+    }, 300);
+  }
+}
 </script>
 
 	
