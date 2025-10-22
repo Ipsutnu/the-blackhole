@@ -405,18 +405,109 @@ function attachResetInDebugPanel() {
   const wrap = document.createElement('div');
   wrap.style.marginTop = '8px';
 
+  // Botão 1️⃣ - Resetar Livros Explodidos
   const btn = document.createElement('button');
   btn.id = 'reset-exploded';
   btn.textContent = 'Resetar Livros Explodidos';
-  btn.style.cssText = 'padding:2px 5px;border-radius:5px;border:1px solid #555;background:#222;color:#ddd;cursor:pointer;';
-
+  btn.style.cssText = `
+    padding: 2px 5px;
+    border-radius: 5px;
+    border: 1px solid #555;
+    background: #222;
+    color: #ddd;
+    cursor: pointer;
+    margin-bottom: 5px;
+    display: block;
+  `;
   btn.addEventListener('click', () => {
     BookCache.reset();
   });
-
   wrap.appendChild(btn);
+
+  // Botão 2️⃣ - Apagar todos os livros
+  const deleteAllBtn = document.createElement('button');
+  deleteAllBtn.textContent = 'Apagar todos os livros';
+  deleteAllBtn.style.cssText = `
+    background: #330000;
+    color: white;
+    border: 1px solid #990000;
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: block;
+  `;
+  deleteAllBtn.onmouseenter = () => deleteAllBtn.style.background = "#550000";
+  deleteAllBtn.onmouseleave = () => deleteAllBtn.style.background = "#330000";
+  deleteAllBtn.onclick = () => {
+    if (deleteAllBtn.dataset.state === "confirm") return;
+
+    deleteAllBtn.dataset.state = "confirm";
+    deleteAllBtn.textContent = "Tem certeza?";
+
+    const yesBtn = document.createElement("button");
+    const noBtn = document.createElement("button");
+
+    yesBtn.textContent = "Sim";
+    noBtn.textContent = "Não";
+
+    for (const b of [yesBtn, noBtn]) {
+      b.style.cssText = `
+        margin-left: 6px;
+        background: #000;
+        color: white;
+        border: 1px solid #999;
+        border-radius: 6px;
+        padding: 3px 8px;
+        cursor: pointer;
+      `;
+      b.onmouseenter = () => b.style.background = "#111";
+      b.onmouseleave = () => b.style.background = "#000";
+    }
+
+    yesBtn.onclick = async () => {
+      // Apaga o IndexedDB e localStorage
+      await new Promise((resolve) => {
+        const del = indexedDB.deleteDatabase("LumenLibrary");
+        del.onsuccess = () => resolve();
+        del.onerror = () => resolve();
+      });
+      localStorage.clear();
+
+      // Remove livros da cena
+      for (const b of bookSystem.books) scene.remove(b.sprite);
+      bookSystem.books = [];
+      document.getElementById('book-count').textContent = 0;
+
+      deleteAllBtn.textContent = "Biblioteca apagada";
+      deleteAllBtn.style.background = "#004400";
+      deleteAllBtn.style.borderColor = "#00ff00";
+      deleteAllBtn.dataset.state = "";
+      yesBtn.remove();
+      noBtn.remove();
+
+      setTimeout(() => {
+        deleteAllBtn.textContent = "Apagar todos os livros";
+        deleteAllBtn.style.background = "#330000";
+        deleteAllBtn.style.borderColor = "#990000";
+      }, 2000);
+    };
+
+    noBtn.onclick = () => {
+      deleteAllBtn.textContent = "Apagar todos os livros";
+      deleteAllBtn.dataset.state = "";
+      yesBtn.remove();
+      noBtn.remove();
+    };
+
+    deleteAllBtn.insertAdjacentElement("afterend", yesBtn);
+    yesBtn.insertAdjacentElement("afterend", noBtn);
+  };
+
+  wrap.appendChild(deleteAllBtn);
   panel.appendChild(wrap);
 }
+
 const orbitCenter = new THREE.Vector3(0, 0, 0);
 function getBookUnderPointer() {
   const b = (bookSystem && bookSystem.hoveredBook) ? bookSystem.hoveredBook : null;
@@ -3905,12 +3996,57 @@ window.addEventListener("dragleave", (e) => {
   e.preventDefault();
   document.body.style.background = "";
 });
+// =========================
+// 🚫 Limitador de 30 arquivos por envio
+// =========================
+
+let isProcessing = false;
+
+// Mensagem de aviso
+const warningMessage = document.createElement("div");
+warningMessage.textContent = "Selecione até 30 arquivos por vez";
+warningMessage.style.cssText = `
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-family: sans-serif;
+  font-size: 22px;
+  background: rgba(0,0,0,0.6);
+  padding: 16px 28px;
+  border-radius: 10px;
+  box-shadow: 0 0 12px rgba(255,255,255,0.3);
+  opacity: 0;
+  transition: opacity 0.5s;
+  pointer-events: none;
+  z-index: 9999;
+`;
+document.body.appendChild(warningMessage);
+
+function showWarning() {
+  warningMessage.style.opacity = "1";
+  setTimeout(() => (warningMessage.style.opacity = "0"), 2000);
+}
+
 window.addEventListener("drop", async (e) => {
   e.preventDefault();
   document.body.style.background = "";
+
+  if (isProcessing) {
+    showWarning();
+    return;
+  }
+
   const pdfs = Array.from(e.dataTransfer.files).filter(f => f.type === "application/pdf");
   if (pdfs.length === 0) return;
 
+  if (pdfs.length > 30) {
+    showWarning();
+    return;
+  }
+
+  isProcessing = true;
   totalFiles = pdfs.length;
   loadedFiles = 0;
   updateProgress();
@@ -3920,6 +4056,8 @@ window.addEventListener("drop", async (e) => {
     loadedFiles++;
     updateProgress();
   }
+
+  isProcessing = false;
 });
 
 // 🔹 Integra com o clique do bookSystem
