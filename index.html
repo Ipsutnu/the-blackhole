@@ -4070,7 +4070,7 @@ let isProcessing = false;
 
 // Mensagem de aviso
 const warningMessage = document.createElement("div");
-warningMessage.textContent = "Selecione até 30 arquivos por vez";
+warningMessage.textContent = "Selecione até 50 arquivos por vez";
 warningMessage.style.cssText = `
   position: fixed;
   top: 50%;
@@ -4107,7 +4107,7 @@ window.addEventListener("drop", async (e) => {
   const pdfs = Array.from(e.dataTransfer.files).filter(f => f.type === "application/pdf");
   if (pdfs.length === 0) return;
 
-  if (pdfs.length > 30) {
+  if (pdfs.length > 50) {
     showWarning();
     return;
   }
