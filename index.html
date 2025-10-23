@@ -466,32 +466,62 @@ function attachResetInDebugPanel() {
     }
 
     yesBtn.onclick = async () => {
-      // Apaga o IndexedDB e localStorage
-      await new Promise((resolve) => {
-        const del = indexedDB.deleteDatabase("LumenLibrary");
-        del.onsuccess = () => resolve();
-        del.onerror = () => resolve();
-      });
-      localStorage.clear();
+  deleteAllBtn.disabled = true;
+  deleteAllBtn.textContent = "Apagando...";
 
-      // Remove livros da cena
-      for (const b of bookSystem.books) scene.remove(b.sprite);
-      bookSystem.books = [];
-      document.getElementById('book-count').textContent = 0;
+  try {
+    // 🔹 Apaga o IndexedDB com timeout de segurança
+    await Promise.race([
+      new Promise((resolve) => {
+        const req = indexedDB.deleteDatabase("LumenLibrary");
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve(); // evita travar se o banco estiver em uso
+      }),
+      new Promise((resolve) => setTimeout(resolve, 1500)) // timeout de 1,5s
+    ]);
 
-      deleteAllBtn.textContent = "Biblioteca apagada";
-      deleteAllBtn.style.background = "#004400";
-      deleteAllBtn.style.borderColor = "#00ff00";
+    // 🔹 Apaga cache local
+    localStorage.clear();
+
+    // 🔹 Remove livros da cena
+    for (const b of bookSystem.books) scene.remove(b.sprite);
+    bookSystem.books = [];
+    document.getElementById('book-count').textContent = 0;
+
+    // 🔹 Feedback visual
+    deleteAllBtn.textContent = "Biblioteca apagada";
+    deleteAllBtn.style.background = "#004400";
+    deleteAllBtn.style.borderColor = "#00ff00";
+
+    yesBtn.remove();
+    noBtn.remove();
+
+    // 🔹 Volta ao botão original após breve pausa
+    setTimeout(() => {
+      deleteAllBtn.disabled = false;
+      deleteAllBtn.textContent = "Apagar todos os livros";
+      deleteAllBtn.style.background = "#330000";
+      deleteAllBtn.style.borderColor = "#990000";
       deleteAllBtn.dataset.state = "";
-      yesBtn.remove();
-      noBtn.remove();
+    }, 1800);
 
-      setTimeout(() => {
-        deleteAllBtn.textContent = "Apagar todos os livros";
-        deleteAllBtn.style.background = "#330000";
-        deleteAllBtn.style.borderColor = "#990000";
-      }, 2000);
-    };
+  } catch (err) {
+    console.warn("Erro ao apagar biblioteca:", err);
+    deleteAllBtn.textContent = "Erro ao apagar";
+    deleteAllBtn.style.background = "#660000";
+    deleteAllBtn.style.borderColor = "#ff0000";
+    yesBtn.remove();
+    noBtn.remove();
+    setTimeout(() => {
+      deleteAllBtn.disabled = false;
+      deleteAllBtn.textContent = "Apagar todos os livros";
+      deleteAllBtn.style.background = "#330000";
+      deleteAllBtn.style.borderColor = "#990000";
+      deleteAllBtn.dataset.state = "";
+    }, 2000);
+  }
+};
 
     noBtn.onclick = () => {
       deleteAllBtn.textContent = "Apagar todos os livros";
@@ -3979,6 +4009,41 @@ async function openPdfFromDB(id) {
 
 // 🔹 Adicionar novo PDF arrastado
 async function addPDF(file) {
+const existing = await loadAllPdfs();
+if (existing.some(p => p.name === file.name)) {
+  console.log(`📕 Ignorado: ${file.name} (já existe na biblioteca)`);
+
+  // ⚪ Mensagem visual com nome do arquivo
+  const msg = document.createElement("div");
+  msg.innerHTML = `📕 <b>${file.name}</b><br>Livro ignorado, arquivo já existe`;
+  msg.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 18px;
+    font-family: sans-serif;
+    text-align: center;
+    background: rgba(0, 0, 0, 0.65);
+    padding: 14px 24px;
+    border-radius: 10px;
+    box-shadow: 0 0 12px rgba(255,255,255,0.3);
+    z-index: 9999;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+  `;
+  document.body.appendChild(msg);
+
+  // fade-in e fade-out suave
+  requestAnimationFrame(() => msg.style.opacity = "1");
+  setTimeout(() => {
+    msg.style.opacity = "0";
+    setTimeout(() => msg.remove(), 600);
+  }, 2200);
+
+  return;
+}
   const cover = await extractPdfCover(file);
   const buffer = await file.arrayBuffer();
   await savePdfToDB(file.name, buffer, cover);
