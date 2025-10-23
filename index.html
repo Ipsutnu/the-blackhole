@@ -488,7 +488,7 @@ function attachResetInDebugPanel() {
     for (const b of bookSystem.books) scene.remove(b.sprite);
     bookSystem.books = [];
     document.getElementById('book-count').textContent = 0;
-
+	
     // 🔹 Feedback visual
     deleteAllBtn.textContent = "Biblioteca apagada";
     deleteAllBtn.style.background = "#004400";
@@ -1626,7 +1626,7 @@ class LightObserver {
     this.appearanceTimer += dt;
 
     // aparece a cada 3 minutos (180s)
-    if (!this.visible && this.appearanceTimer >= 180) {
+    if (!this.visible && this.appearanceTimer >= 360) {
       this._spawn();
       this.appearanceTimer = 0;
     }
@@ -3991,6 +3991,7 @@ async function spawnPdfBook(record) {
   };
   bookSystem.books.push(bookObject);
   scene.add(sprite);
+  document.getElementById('book-count').textContent = bookSystem.books.length;
 }
 
 // 🔹 Lê e abre PDF do banco ao clicar
@@ -4151,6 +4152,7 @@ handleBookClick = function (event) {
   await openDatabase();
   const pdfs = await loadAllPdfs();
   for (const p of pdfs) await spawnPdfBook(p);
+  document.getElementById('book-count').textContent = bookSystem.books.length;
 })();
 
 // =========================
