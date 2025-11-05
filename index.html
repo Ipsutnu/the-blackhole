@@ -4425,7 +4425,7 @@ function updateProgress() {
   }
 }
 </script>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
 <script>
 document.getElementById('generate-qr').addEventListener('click', async (e) => {
@@ -4634,7 +4634,7 @@ async function uploadPdfToFileIO(recordId, onProgress) {
       formData.append("file", blob, record.name);
 
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", "https://file.io", true);
+      xhr.open("POST", "https://www.filemail.com/api/transfer/initialize", true);
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable && onProgress) {
@@ -4645,18 +4645,43 @@ async function uploadPdfToFileIO(recordId, onProgress) {
 
       xhr.onload = () => {
         try {
-          const response = JSON.parse(xhr.responseText);
-          if (response.success && response.link) {
-            resolve(response.link);
+          const initResp = JSON.parse(xhr.responseText);
+          if (initResp.responsestatus === "ok" && initResp.transferurl) {
+            const uploadUrl = initResp.transferurl; 
+            // Agora fazer POST do blob para uploadUrl
+            const xhr2 = new XMLHttpRequest();
+            xhr2.open("POST", uploadUrl + `?transferid=${initResp.transferid}&transferkey=${initResp.transferkey}&thefilename=${encodeURIComponent(record.name)}`, true);
+            xhr2.upload.onprogress = (evt) => {
+              if (evt.lengthComputable && onProgress) {
+                const pct = ((evt.loaded / evt.total) * 100).toFixed(1);
+                onProgress(pct);
+              }
+            };
+            xhr2.onload = () => {
+              // Após upload, obter link de download
+              const xhr3 = new XMLHttpRequest();
+              xhr3.open("GET", `https://www.filemail.com/api/transfer/get?transferid=${initResp.transferid}`, true);
+              xhr3.onload = () => {
+                const resp3 = JSON.parse(xhr3.responseText);
+                if (resp3.transfer && resp3.transfer.url) {
+                  resolve(resp3.transfer.url);
+                } else {
+                  reject("Não conseguiu obter link de download");
+                }
+              };
+              xhr3.onerror = () => reject("Erro ao obter link de download");
+              xhr3.send();
+            };
+            xhr2.onerror = () => reject("Erro de upload secundário");
+            xhr2.send(blob);
           } else {
-            reject("Falha ao enviar: " + xhr.responseText);
+            reject("Inicialização falhou: " + xhr.responseText);
           }
         } catch (err) {
           reject(err);
         }
       };
-
-      xhr.onerror = () => reject("Erro de rede.");
+      xhr.onerror = () => reject("Erro de rede durante inicialização");
       xhr.send(formData);
     };
 
