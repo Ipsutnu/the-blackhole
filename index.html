@@ -204,7 +204,8 @@ a:focus { outline: none; }
     <a href="#" id="toggle-debug">Debug Mode</a> •
     <a href="#" id="toggle-warp"></a>
     <a href="#" id="toggle-covers">Ocultar Livros</a> •
-	<a href="#" id="toggle-licence">Licence</a>
+	<a href="#" id="toggle-licence">Licence</a> •
+	<a href="#" id="generate-qr">Conectar Phone</a>
   </div>
 </div>
     <div id="help" style="display:none">
@@ -661,15 +662,23 @@ const BookCache = (() => {
   function has(b) { return set.has(keyFor(b)); }
 
   function applyToBooks() {
-    if (!bookSystem?.books) return;
-    for (const b of bookSystem.books) {
-      if (!b?.sprite) continue;
-      const hidden = has(b);
-      b._exploded = hidden;
-      b.sprite.visible = !hidden;
-      if (hidden) b.sprite.userData.disabled = true;
-    }
+  if (!bookSystem?.books) return;
+
+  for (const b of bookSystem.books) {
+    if (!b?.sprite) continue;
+
+    const hidden = has(b); // se está salvo no cache (explodido permanentemente)
+    const tempHidden = b._hiddenUntil && performance.now() < b._hiddenUntil; // se está "sumido" temporariamente
+
+    // atualiza flags internas
+    b._exploded = hidden || tempHidden;
+    b.sprite.userData.disabled = hidden || tempHidden;
+
+    // visibilidade final
+    b.sprite.visible = !hidden && !tempHidden;
   }
+}
+
 
   function reset() {
     set.clear(); save();
@@ -1791,18 +1800,28 @@ function pickRandomEligibleBook() {
 }
 function explodeBook(book) {
   if (!book || book._exploded || isBookFavorited(book)) return;
+
+  // marca como explodido e oculto
   book._exploded = true;
+  book._hiddenUntil = performance.now() + 60000;
+
   const p = book.sprite.position.clone();
   book.sprite.visible = false;
+
+  // efeito visual da explosão
   explosionManager.spawn(p, { count: 200, life: 6.6 });
+
+  // agenda o retorno visual
   setTimeout(() => {
     if (!book || !book.sprite) return;
-    book.sprite.visible = !coversMuted;
     book._exploded = false;
+    book._hiddenUntil = null;
+    if (!coversMuted) book.sprite.visible = true;
   }, 60000);
 }
-const EXP_FIRST_MS  = 20000;
-const EXP_PERIOD_MS = 23691;
+
+const EXP_FIRST_MS  = 10000;
+const EXP_PERIOD_MS = 13690;
 let   _explosionTimer = null;
 let   _nextExplosionAt = 0;
 
@@ -1940,11 +1959,113 @@ function startWarpToBlackHole() {
   warp.look.copy(currentLookPoint);
   warp.fovTarget = 30;
 }
+
+let pendingWarp = null;
+
+function requestWarp(book) {
+  if (document.hidden) {
+    pendingWarp = book;
+  } else {
+    startWarpTo(book);
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && pendingWarp) {
+    // aplica o warp instantâneo ao voltar
+    warpToInstant(pendingWarp);
+    pendingWarp = null;
+  }
+});
+
+let zoomingBook = null;
+let zoomProgress = 0;
+let zoomInterval = null;
+let zoomTargetFov = 0;
+let zoomBaseFov = 0;
+
 window.addEventListener('wheel', (e) => {
   const freeOrbit = (!selectedBook && (!warp || !warp.active) && orbitCenter.lengthSq() > 1e-6);
-  if (selectedBook || freeOrbit) {
+
+  // Nenhum livro selecionado → comportamento normal
+  if (!selectedBook && freeOrbit) {
     if (!warp || !warp.active) startWarpToBlackHole();
     e.preventDefault();
+    return;
+  }
+
+  // Se tiver livro selecionado
+  if (selectedBook) {
+    // Scroll pra trás → foco no buraco negro
+    if (e.deltaY > 0) {
+      if (!warp || !warp.active) startWarpToBlackHole();
+      e.preventDefault();
+      return;
+    }
+
+    // Scroll pra frente → zoom real fechando o FOV
+if (e.deltaY < 0) {
+  e.preventDefault();
+  if (zoomInterval) return; // já está em zoom
+
+  zoomingBook = selectedBook;
+  zoomProgress = 0;
+
+  // Cria label simples com o nome do livro
+  let label = document.getElementById('book-zoom-label');
+  if (!label) {
+    label = document.createElement('div');
+    label.id = 'book-zoom-label';
+    label.style.position = 'fixed';
+    label.style.bottom = '25px';
+    label.style.left = '50%';
+    label.style.transform = 'translateX(-50%)';
+    label.style.color = 'white';
+    label.style.fontFamily = 'monospace';
+    label.style.fontSize = '18px';
+    label.style.textShadow = '0 0 6px rgba(255,255,255,0.5)';
+    label.style.pointerEvents = 'none';
+    document.body.appendChild(label);
+  }
+
+	const rawName = zoomingBook.title || zoomingBook.pdf?.split('/').pop() || 'Arquivo sem nome';
+	const cleanName = rawName.replace(/\.[^/.]+$/, ''); // remove extensão (.pdf, .txt, etc.)
+	label.textContent = cleanName;
+  label.style.opacity = '1';
+  label.style.transition = 'opacity 2.6s ease';
+  
+	const originalFov = camera.fov;
+  const baseFov = camera.fov;
+  const targetFov = Math.max(baseFov - 30, 10); // fecha a lente, mínimo 10º
+  const step = 0.015; // velocidade
+
+  zoomInterval = setInterval(() => {
+    zoomProgress += step;
+    camera.fov = THREE.MathUtils.lerp(baseFov, targetFov, zoomProgress);
+    camera.updateProjectionMatrix();
+
+    if (zoomProgress >= 1) {
+      clearInterval(zoomInterval);
+      zoomInterval = null;
+	  
+// some com o label
+label.style.opacity = '0';
+
+// Abre o PDF via IndexedDB, mesmo método do clique
+if (zoomingBook.pdf && typeof openPdfFromDB === 'function') {
+  openPdfFromDB(zoomingBook.pdf);
+} else if (zoomingBook.pdfRecordId && typeof openPdfFromDB === 'function') {
+  openPdfFromDB(zoomingBook.pdfRecordId);
+} else {
+  console.warn('⚠️ Nenhum identificador de PDF válido encontrado para o livro:', zoomingBook);
+}
+
+// limpa o zoom e volta pro estado normal via warp
+label.style.opacity = '0';
+zoomingBook = null;
+    }
+  }, 16);
+}
   }
 }, { passive: false });
 function startWarpTo(bookObj) {
@@ -3885,10 +4006,29 @@ if (toggleHelp){
       animate();
 	  
 	  
+	  
     </script>
 	
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
+
+async function importBooksFromJson() {
+  try {
+    const response = await fetch('books.json');
+    if (!response.ok) throw new Error("Nenhum espelho encontrado");
+    const data = await response.json();
+
+    console.log("📲 Carregando biblioteca espelhada:", data);
+
+    for (const record of data) {
+      await spawnPdfBook(record);
+    }
+
+    document.getElementById('book-count').textContent = bookSystem.books.length;
+  } catch (err) {
+    console.log("Nenhum espelho JSON encontrado. Carregamento local.");
+  }
+}
 /* =====================================================
    📚 Biblioteca Cósmica - IndexedDB + BookSystem
    ===================================================== */
@@ -3989,7 +4129,7 @@ async function spawnPdfBook(record) {
     wobbleSpeed: 0.008 + Math.random() * 0.025,
     phase: Math.random() * Math.PI * 2
   };
-  bookObject.pdf = record.name;
+  bookObject.pdf = record.id;
   bookSystem.books.push(bookObject);
   scene.add(sprite);
   // 🔥 Integra PDFs ao sistema de explosões
@@ -4008,6 +4148,25 @@ if (typeof BookCache !== "undefined" && typeof BookCache.add === "function") {
 // garante que está listado para explosões
 if (!bookSystem.books.includes(bookObject)) {
   bookSystem.books.push(bookObject);
+  // Atualiza espelho JSON com todos os livros
+function exportBooksJson() {
+  const booksData = bookSystem.books.map(b => ({
+    title: b.title || 'Livro sem título',
+    pdf: b.pdf || '',
+    cover: b.sprite?.material?.map?.image?.src || '',
+  }));
+
+  const json = JSON.stringify(booksData, null, 2);
+  localStorage.setItem('books_json_cache', json); // guarda localmente
+
+  // Se possível, cria um arquivo em memória pra servir como /books.json
+  const blob = new Blob([json], { type: 'application/json' });
+  window.BOOKS_JSON_URL = URL.createObjectURL(blob);
+  console.log("📚 Biblioteca exportada para memória:", window.BOOKS_JSON_URL);
+}
+
+// toda vez que um livro novo é adicionado:
+exportBooksJson();
 }
   document.getElementById('book-count').textContent = bookSystem.books.length;
   if (typeof favSet !== "undefined" && typeof bookKey === "function" && favSet.has(bookKey(bookObject))) {
@@ -4172,10 +4331,55 @@ handleBookClick = function (event) {
 // 🔹 Inicia banco e carrega livros salvos
 (async () => {
   await openDatabase();
-  const pdfs = await loadAllPdfs();
-  for (const p of pdfs) await spawnPdfBook(p);
+  const localBooks = await loadAllPdfs();
+
+  if (localBooks.length > 0) {
+    console.log("📘 Carregando livros locais do IndexedDB");
+    for (const p of localBooks) await spawnPdfBook(p);
+  } else {
+    console.log("📡 Nenhum livro local — tentando importar do espelho JSON");
+    await importBooksFromJson();
+  }
+
   document.getElementById('book-count').textContent = bookSystem.books.length;
 })();
+
+async function saveBooksJsonToDisk() {
+  const json = localStorage.getItem('books_json_cache');
+  if (!json) return;
+  await fetch('/save_json', { method: 'POST', body: json });
+}
+// ======================================================
+// 💥 Sistema de explosões automáticas (ativação global)
+// ======================================================
+
+// Se já houver algum timer rodando, cancela antes
+if (_explosionTimer) clearTimeout(_explosionTimer);
+
+function _tickExplosionOnce() {
+  const available = bookSystem.books.filter(
+    b => b && !b._exploded && !isBookFavorited(b)
+  );
+
+  if (available.length > 0) {
+    const randomBook = available[Math.floor(Math.random() * available.length)];
+    explodeBook(randomBook);
+  }
+
+  // agenda a próxima explosão
+  _scheduleNextExplosion(EXP_PERIOD_MS);
+}
+
+function startAutoExplosions() {
+  console.log("💥 Sistema de explosões automáticas iniciado");
+  _scheduleNextExplosion(EXP_FIRST_MS);
+}
+
+// inicia o sistema de explosões 2 segundos após carregar os livros
+setTimeout(() => {
+  startAutoExplosions();
+}, 2000);
+
 
 // =========================
 // 📶 Barra de progresso visual
@@ -4222,6 +4426,270 @@ function updateProgress() {
 }
 </script>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+<script>
+document.getElementById('generate-qr').addEventListener('click', async (e) => {
+  e.preventDefault();
+
+  // Evita múltiplos QR codes
+  const existing = document.getElementById('qr-overlay');
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  // Cria container escuro de fundo
+  const overlay = document.createElement('div');
+  overlay.id = 'qr-overlay';
+  overlay.style.position = 'fixed';
+  overlay.style.top = '0';
+  overlay.style.left = '0';
+  overlay.style.width = '100vw';
+  overlay.style.height = '100vh';
+  overlay.style.background = 'rgba(0, 0, 0, 0.8)';
+  overlay.style.display = 'flex';
+  overlay.style.flexDirection = 'column';
+  overlay.style.justifyContent = 'center';
+  overlay.style.alignItems = 'center';
+  overlay.style.zIndex = '9999';
+  overlay.style.transition = 'opacity 0.3s ease';
+  overlay.style.cursor = 'pointer';
+  overlay.title = 'Clique para fechar';
+  document.body.appendChild(overlay);
+
+  // Mensagem de carregando
+  const loadingText = document.createElement('div');
+  loadingText.textContent = 'Gerando QR Code...';
+  loadingText.style.color = '#fff';
+  loadingText.style.fontFamily = 'monospace';
+  loadingText.style.marginBottom = '20px';
+  overlay.appendChild(loadingText);
+
+  const qrCanvas = document.createElement('canvas');
+  overlay.appendChild(qrCanvas);
+
+  overlay.addEventListener('click', () => overlay.remove());
+
+  try {
+    // Cria conexão WebRTC pra descobrir IP local
+    const pc = new RTCPeerConnection({ iceServers: [] });
+    pc.createDataChannel('');
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    let found = false;
+    pc.onicecandidate = (event) => {
+      if (!event || !event.candidate || !event.candidate.candidate) return;
+
+      const ipMatch = event.candidate.candidate.match(/([0-9]{1,3}(\.[0-9]{1,3}){3})/);
+      if (ipMatch && !found) {
+        found = true;
+        const localIP = ipMatch[1];
+        const host = window.location.hostname || localIP || "localhost";
+		const port = window.location.port || 8080;
+		const url = `http://${host}:${port}/18.html`;
+
+        new QRious({
+          element: qrCanvas,
+          value: url,
+          size: 260,
+          background: 'white',
+          foreground: 'black'
+        });
+
+        loadingText.textContent = 'Escaneie com o celular 📱';
+        pc.close();
+      }
+    };
+
+    // Se não conseguir achar IP (ex: em navegador restrito)
+    setTimeout(() => {
+      if (!found) {
+        const fallbackURL = window.location.href;
+        new QRious({
+          element: qrCanvas,
+          value: fallbackURL,
+          size: 260,
+          background: 'white',
+          foreground: 'black'
+        });
+        loadingText.textContent = 'Escaneie com o celular 📱 (modo padrão)';
+      }
+    }, 2000);
+
+  } catch (err) {
+    console.warn('Erro ao gerar QR:', err);
+    loadingText.textContent = 'Erro ao gerar QR Code.';
+  }
+});
+
+
+/* =====================================================
+   📤 Compartilhar Livro com Celular (via File.io)
+   ===================================================== */
+
+// Cria elementos de interface
+const shareBtn = document.createElement("button");
+shareBtn.textContent = "✆";
+shareBtn.style.cssText = `
+  position: fixed;
+  bottom: 40px;
+  left: 40px;
+  background: rgba(255,255,255,0.1);
+  color: white;
+  border: 1px solid white;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  display: none;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+`;
+
+const shareProgressBar = document.createElement("div");
+shareProgressBar.style.cssText = `
+  position: fixed;
+  bottom: 20px;
+  left: 40px;
+  width: 200px;
+  height: 4px;
+  background: rgba(255,255,255,0.2);
+  overflow: hidden;
+  border-radius: 4px;
+  display: none;
+  z-index: 1000;
+`;
+const shareProgressFill = document.createElement("div");
+shareProgressFill.style.cssText = `
+  width: 0%;
+  height: 100%;
+  background: white;
+  transition: width 0.2s;
+`;
+shareProgressBar.appendChild(shareProgressFill);
+document.body.appendChild(shareBtn);
+document.body.appendChild(shareProgressBar);
+
+// QR container
+const qrContainer = document.createElement("div");
+qrContainer.style.cssText = `
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0,0,0,0.8);
+  padding: 20px;
+  border-radius: 12px;
+  z-index: 2000;
+  display: none;
+`;
+document.body.appendChild(qrContainer);
+
+let currentQr = null;
+
+// Atualiza visibilidade do botão conforme o livro selecionado
+function updateShareButton() {
+  if (selectedBook && selectedBook.pdfRecordId) {
+    shareBtn.style.display = "block";
+  } else {
+    shareBtn.style.display = "none";
+  }
+}
+
+// Observa mudanças no selectedBook
+setInterval(updateShareButton, 500);
+
+// 🔹 Ao clicar, faz upload e mostra QR
+shareBtn.addEventListener("click", async () => {
+  if (!selectedBook || !selectedBook.pdfRecordId) return;
+  shareProgressBar.style.display = "block";
+  shareProgressFill.style.width = "0%";
+
+  try {
+    const link = await uploadPdfToFileIO(selectedBook.pdfRecordId, (p) => {
+      shareProgressFill.style.width = `${p}%`;
+    });
+    shareProgressBar.style.display = "none";
+    showQrForLink(link);
+  } catch (err) {
+    shareProgressBar.style.display = "none";
+    alert("Erro ao enviar o livro.");
+    console.error(err);
+  }
+});
+
+// 🔹 Lê PDF do IndexedDB e envia pro File.io
+async function uploadPdfToFileIO(recordId, onProgress) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_NAME], "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.get(recordId);
+
+    req.onsuccess = async (e) => {
+      const record = e.target.result;
+      if (!record) return reject("PDF não encontrado.");
+
+      const blob = new Blob([record.data], { type: "application/pdf" });
+      const formData = new FormData();
+      formData.append("file", blob, record.name);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "https://file.io", true);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) {
+          const percent = ((event.loaded / event.total) * 100).toFixed(1);
+          onProgress(percent);
+        }
+      };
+
+      xhr.onload = () => {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          if (response.success && response.link) {
+            resolve(response.link);
+          } else {
+            reject("Falha ao enviar: " + xhr.responseText);
+          }
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      xhr.onerror = () => reject("Erro de rede.");
+      xhr.send(formData);
+    };
+
+    req.onerror = (e) => reject(e);
+  });
+}
+
+// 🔹 Mostra QR Code centralizado
+async function showQrForLink(link) {
+  qrContainer.style.display = "block";
+  qrContainer.innerHTML = `
+    <div style="text-align:center;">
+      <div id="qrcode"></div>
+      <p style="color:white;font-family:sans-serif;margin-top:8px;">
+        Escaneie para baixar o PDF
+      </p>
+    </div>
+  `;
+  currentQr = new QRCode(document.getElementById("qrcode"), {
+    text: link,
+    width: 220,
+    height: 220,
+    colorDark: "#ffffff",
+    colorLight: "#000000",
+  });
+
+  qrContainer.addEventListener("click", () => {
+    qrContainer.style.display = "none";
+    qrContainer.innerHTML = "";
+  });
+}
+
+</script>
 	
   </body>
 </html>
