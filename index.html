@@ -204,8 +204,8 @@ a:focus { outline: none; }
     <a href="#" id="toggle-debug">Debug Mode</a> •
     <a href="#" id="toggle-warp"></a>
     <a href="#" id="toggle-covers">Ocultar Livros</a> •
-	<a href="#" id="toggle-licence">Licence</a> •
-	<a href="#" id="generate-qr">Conectar Phone</a>
+	<a href="#" id="toggle-licence">Licence</a>
+	<a href="#" id="generate-qr"></a>
   </div>
 </div>
     <div id="help" style="display:none">
@@ -4530,7 +4530,7 @@ document.getElementById('generate-qr').addEventListener('click', async (e) => {
 
 // Cria elementos de interface
 const shareBtn = document.createElement("button");
-shareBtn.textContent = "✆";
+shareBtn.textContent = "✉︎";
 shareBtn.style.cssText = `
   position: fixed;
   bottom: 40px;
@@ -4588,9 +4588,41 @@ document.body.appendChild(qrContainer);
 let currentQr = null;
 
 // Atualiza visibilidade do botão conforme o livro selecionado
+let hideShareTimeout = null;
+
+// Atualiza visibilidade do botão conforme o livro selecionado e interação do mouse
 function updateShareButton() {
   if (selectedBook && selectedBook.pdfRecordId) {
-    shareBtn.style.display = "block";
+    const sprite = selectedBook.sprite;
+    if (!sprite.userData._hoverEventsAdded) {
+      // Adiciona eventos apenas uma vez por sprite
+      sprite.userData._hoverEventsAdded = true;
+
+      // Detecta hover sobre a capa (via raycasting global)
+      window.addEventListener("mousemove", (event) => {
+        if (!selectedBook) return;
+
+        const mouse = new THREE.Vector2(
+          (event.clientX / window.innerWidth) * 2 - 1,
+          -(event.clientY / window.innerHeight) * 2 + 1
+        );
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, camera);
+
+        const intersects = raycaster.intersectObject(selectedBook.sprite);
+        const isHovering = intersects.length > 0;
+
+        if (isHovering) {
+          clearTimeout(hideShareTimeout);
+          shareBtn.style.display = "block";
+        } else {
+          clearTimeout(hideShareTimeout);
+          hideShareTimeout = setTimeout(() => {
+            shareBtn.style.display = "none";
+          }, 3000);
+        }
+      });
+    }
   } else {
     shareBtn.style.display = "none";
   }
