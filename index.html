@@ -4634,7 +4634,7 @@ async function uploadPdfToFileIO(recordId, onProgress) {
       formData.append("file", blob, record.name);
 
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", "https://www.filemail.com/api/transfer/initialize", true);
+      xhr.open("POST", "https://tmpfiles.org/api/v1/upload", true);
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable && onProgress) {
@@ -4645,43 +4645,21 @@ async function uploadPdfToFileIO(recordId, onProgress) {
 
       xhr.onload = () => {
         try {
-          const initResp = JSON.parse(xhr.responseText);
-          if (initResp.responsestatus === "ok" && initResp.transferurl) {
-            const uploadUrl = initResp.transferurl; 
-            // Agora fazer POST do blob para uploadUrl
-            const xhr2 = new XMLHttpRequest();
-            xhr2.open("POST", uploadUrl + `?transferid=${initResp.transferid}&transferkey=${initResp.transferkey}&thefilename=${encodeURIComponent(record.name)}`, true);
-            xhr2.upload.onprogress = (evt) => {
-              if (evt.lengthComputable && onProgress) {
-                const pct = ((evt.loaded / evt.total) * 100).toFixed(1);
-                onProgress(pct);
-              }
-            };
-            xhr2.onload = () => {
-              // Após upload, obter link de download
-              const xhr3 = new XMLHttpRequest();
-              xhr3.open("GET", `https://www.filemail.com/api/transfer/get?transferid=${initResp.transferid}`, true);
-              xhr3.onload = () => {
-                const resp3 = JSON.parse(xhr3.responseText);
-                if (resp3.transfer && resp3.transfer.url) {
-                  resolve(resp3.transfer.url);
-                } else {
-                  reject("Não conseguiu obter link de download");
-                }
-              };
-              xhr3.onerror = () => reject("Erro ao obter link de download");
-              xhr3.send();
-            };
-            xhr2.onerror = () => reject("Erro de upload secundário");
-            xhr2.send(blob);
-          } else {
-            reject("Inicialização falhou: " + xhr.responseText);
+          const response = JSON.parse(xhr.responseText);
+          if (response?.data?.url) {
+  // Extrai o ID e cria o link direto de download
+  const match = response.data.url.match(/\/api\/v1\/([^/]+)/);
+  const link = match ? `https://tmpfiles.org/dl/${match[1]}` : response.data.url;
+  resolve(link);
+} else {
+            reject("Falha ao enviar: " + xhr.responseText);
           }
         } catch (err) {
           reject(err);
         }
       };
-      xhr.onerror = () => reject("Erro de rede durante inicialização");
+
+      xhr.onerror = () => reject("Erro de rede.");
       xhr.send(formData);
     };
 
@@ -4691,6 +4669,12 @@ async function uploadPdfToFileIO(recordId, onProgress) {
 
 // 🔹 Mostra QR Code centralizado
 async function showQrForLink(link) {
+  // converte link normal do tmpfiles para link de download direto (/dl/)
+  let finalLink = link;
+  if (link.includes("tmpfiles.org/") && !link.includes("/dl/")) {
+    finalLink = link.replace("tmpfiles.org/", "tmpfiles.org/dl/");
+  }
+
   qrContainer.style.display = "block";
   qrContainer.innerHTML = `
     <div style="text-align:center;">
@@ -4700,8 +4684,9 @@ async function showQrForLink(link) {
       </p>
     </div>
   `;
+
   currentQr = new QRCode(document.getElementById("qrcode"), {
-    text: link,
+    text: finalLink,
     width: 220,
     height: 220,
     colorDark: "#ffffff",
